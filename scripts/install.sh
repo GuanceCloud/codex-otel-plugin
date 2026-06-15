@@ -27,6 +27,58 @@ log() {
   printf '[install] %s\n' "$1"
 }
 
+resolve_node() {
+  local candidate
+  if [[ -n "${CODEX_OTEL_NODE:-}" ]]; then
+    if [[ -x "$CODEX_OTEL_NODE" ]]; then
+      printf '%s' "$CODEX_OTEL_NODE"
+      return 0
+    fi
+    echo "CODEX_OTEL_NODE is not executable: $CODEX_OTEL_NODE" >&2
+    exit 1
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return 0
+  fi
+
+  for candidate in \
+    "$HOME"/.nvm/versions/node/*/bin/node \
+    "$HOME"/.volta/bin/node \
+    /opt/homebrew/bin/node \
+    /usr/local/bin/node \
+    /usr/bin/node
+  do
+    if [[ -x "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+
+  cat >&2 <<'EOF'
+Missing required command: node
+
+codex-otel-plugin requires Node.js >= 22 because the Codex Stop hook runs as a Node.js script.
+
+Fix options:
+  1. Install Node.js 22+ and retry.
+  2. If Node is already installed but not in PATH, run:
+     CODEX_OTEL_NODE=/path/to/node scripts/install.sh ...
+EOF
+  exit 1
+}
+
+check_node_version() {
+  local node_bin="$1"
+  local major
+  major="$("$node_bin" -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || true)"
+  if [[ -z "$major" || "$major" -lt 22 ]]; then
+    echo "Node.js >= 22 is required. Found: $("$node_bin" -v 2>/dev/null || echo unknown) at $node_bin" >&2
+    exit 1
+  fi
+}
+
 usage() {
   cat <<HELP
 Usage:
@@ -51,6 +103,7 @@ Environment variables:
   GTRACE_TRACE_PATH       Same as --trace-path
   GTRACE_X_TOKEN          Same as --x-token
   X_TOKEN                 Same as --x-token
+  CODEX_OTEL_NODE         Node.js executable path when node is not in PATH
   GTRACE_CONFIG_FILE      Same as --config-file
 HELP
 }
@@ -144,6 +197,9 @@ if [[ ! -f "$REPO_ROOT/src/codex-hook-wrapper.js" ]]; then
   exit 1
 fi
 
+NODE_BIN="$(resolve_node)"
+check_node_version "$NODE_BIN"
+
 case "$INSTALL_TYPE" in
   gtrace|otlp|otel)
     ;;
@@ -164,8 +220,8 @@ if [[ -z "$TRACE_PATH" && ( -n "$ENDPOINT" || ! -f "$CONFIG_FILE" || "$TRACE_PAT
   fi
 fi
 
-VERSION="$(node -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.0')"
-HOOK_COMMAND="node $REPO_ROOT/src/codex-hook-wrapper.js"
+VERSION="$("$NODE_BIN" -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.0')"
+HOOK_COMMAND="$NODE_BIN $REPO_ROOT/src/codex-hook-wrapper.js"
 
 mkdir -p "$PLUGIN_ROOT/.codex-plugin" "$PLUGIN_ROOT/hooks" "$MARKETPLACE_ROOT/.agents/plugins"
 
@@ -242,10 +298,10 @@ write_config() {
   local tags_json='[]'
   local headers_json='[]'
   if [[ "${#TAGS[@]}" -gt 0 ]]; then
-    tags_json="$(printf '%s\n' "${TAGS[@]}" | node -e 'const fs=require("fs"); const lines=fs.readFileSync(0,"utf8").split(/\n/).map(s=>s.trim()).filter(Boolean); process.stdout.write(JSON.stringify(lines));')"
+    tags_json="$(printf '%s\n' "${TAGS[@]}" | "$NODE_BIN" -e 'const fs=require("fs"); const lines=fs.readFileSync(0,"utf8").split(/\n/).map(s=>s.trim()).filter(Boolean); process.stdout.write(JSON.stringify(lines));')"
   fi
   if [[ "${#HEADERS[@]}" -gt 0 ]]; then
-    headers_json="$(printf '%s\n' "${HEADERS[@]}" | node -e 'const fs=require("fs"); const lines=fs.readFileSync(0,"utf8").split(/\n/).map(s=>s.trim()).filter(Boolean); process.stdout.write(JSON.stringify(lines));')"
+    headers_json="$(printf '%s\n' "${HEADERS[@]}" | "$NODE_BIN" -e 'const fs=require("fs"); const lines=fs.readFileSync(0,"utf8").split(/\n/).map(s=>s.trim()).filter(Boolean); process.stdout.write(JSON.stringify(lines));')"
   fi
 
   GTRACE_CONFIG_FILE_RUNTIME="$CONFIG_FILE" \
@@ -256,7 +312,7 @@ write_config() {
   GTRACE_DEBUG_RUNTIME="$DEBUG" \
   GTRACE_TAGS_RUNTIME="$tags_json" \
   GTRACE_HEADERS_RUNTIME="$headers_json" \
-  node <<'NODE'
+  "$NODE_BIN" <<'NODE'
 const fs = require("fs");
 const path = require("path");
 

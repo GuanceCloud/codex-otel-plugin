@@ -30,6 +30,7 @@ Environment variables:
   CODEX_OTEL_VERSION      Git ref/tag. Default: main
   CODEX_OTEL_INSTALL_DIR  Install directory. Default: ~/.codex/codex-otel-plugin
   CODEX_OTEL_ARCHIVE_URL  Full tar.gz URL override.
+  CODEX_OTEL_NODE         Node.js executable path when node is not in PATH.
 HELP
     exit 0
     ;;
@@ -58,6 +59,58 @@ need() {
   fi
 }
 
+resolve_node() {
+  local candidate
+  if [[ -n "${CODEX_OTEL_NODE:-}" ]]; then
+    if [[ -x "$CODEX_OTEL_NODE" ]]; then
+      printf '%s' "$CODEX_OTEL_NODE"
+      return 0
+    fi
+    echo "CODEX_OTEL_NODE is not executable: $CODEX_OTEL_NODE" >&2
+    exit 1
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return 0
+  fi
+
+  for candidate in \
+    "$HOME"/.nvm/versions/node/*/bin/node \
+    "$HOME"/.volta/bin/node \
+    /opt/homebrew/bin/node \
+    /usr/local/bin/node \
+    /usr/bin/node
+  do
+    if [[ -x "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+
+  cat >&2 <<'EOF'
+Missing required command: node
+
+codex-otel-plugin requires Node.js >= 22 because the Codex Stop hook runs as a Node.js script.
+
+Fix options:
+  1. Install Node.js 22+ and retry.
+  2. If Node is already installed but not in PATH, run:
+     CODEX_OTEL_NODE=/path/to/node bash -s -- latest ...
+EOF
+  exit 1
+}
+
+check_node_version() {
+  local node_bin="$1"
+  local major
+  major="$("$node_bin" -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || true)"
+  if [[ -z "$major" || "$major" -lt 22 ]]; then
+    echo "Node.js >= 22 is required. Found: $("$node_bin" -v 2>/dev/null || echo unknown) at $node_bin" >&2
+    exit 1
+  fi
+}
+
 safe_replace_dir() {
   local src="$1"
   local dest="$2"
@@ -73,7 +126,9 @@ safe_replace_dir() {
 need curl
 need tar
 need gzip
-need node
+NODE_BIN="$(resolve_node)"
+check_node_version "$NODE_BIN"
+export CODEX_OTEL_NODE="$NODE_BIN"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT

@@ -47,6 +47,13 @@ node <repo>/src/codex-hook-wrapper.js
 - 远程安装需要 `curl`、`tar`、`gzip`
 - 无需安装运行时依赖
 
+如果 Node.js 已安装但不在非交互 shell 的 `PATH` 中，可以指定 Node 路径：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+  | CODEX_OTEL_NODE=/path/to/node bash -s -- latest --endpoint <endpoint> --x-token <token>
+```
+
 ## 安装
 
 推荐使用远程安装器，不需要 `git clone`：

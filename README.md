@@ -47,6 +47,8 @@ node <repo>/src/codex-hook-wrapper.js
 - 远程安装需要 `curl`、`tar`、`gzip`
 - 无需安装运行时依赖
 
+说明：Codex 会触发 Stop hook，但不会为 hook 提供 Node.js 运行时。当前 hook 是 Node.js 脚本，因此客户环境需要有 Node.js 22+。
+
 如果 Node.js 已安装但不在非交互 shell 的 `PATH` 中，可以指定 Node 路径：
 
 ```bash

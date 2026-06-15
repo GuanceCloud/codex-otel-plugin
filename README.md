@@ -44,21 +44,23 @@ node <repo>/src/codex-hook-wrapper.js
 ## 运行要求
 
 - Node.js >= 22
+- 远程安装需要 `curl`、`tar`、`gzip`
 - 无需安装运行时依赖
 
 ## 安装
 
+推荐使用远程安装器，不需要 `git clone`：
+
 ```bash
-git clone https://github.com/GuanceCloud/codex-otel-plugin.git
-cd codex-otel-plugin
-./scripts/install.sh --refresh
+curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh | bash
 ```
 
 安装脚本会完成：
 
+- 下载插件文件到 `~/.codex/codex-otel-plugin`
 - 创建本地 Codex marketplace：`~/.codex/gtrace-codex-observe`
 - 写入插件：`tracing@gtrace-codex-observe`
-- 写入 Stop hook：`node <repo>/src/codex-hook-wrapper.js`
+- 写入 Stop hook：`node ~/.codex/codex-otel-plugin/src/codex-hook-wrapper.js`
 - 通过 Codex CLI 刷新插件缓存
 
 然后配置 `~/.codex/gtrace.json`：
@@ -80,13 +82,27 @@ cd codex-otel-plugin
 
 ## 升级
 
+升级也使用同一条命令：
+
 ```bash
-cd /path/to/codex-otel-plugin
-git pull --ff-only
-./scripts/install.sh --refresh
+curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh | bash
 ```
 
-升级脚本会重写插件和 hook 配置，并刷新 Codex 插件缓存；不会覆盖 `~/.codex/gtrace.json`。
+升级脚本会重新下载插件文件、重写插件和 hook 配置，并刷新 Codex 插件缓存；不会覆盖 `~/.codex/gtrace.json`。
+
+安装指定版本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh | CODEX_OTEL_VERSION=v0.1.0 bash
+```
+
+开发安装：
+
+```bash
+git clone https://github.com/GuanceCloud/codex-otel-plugin.git
+cd codex-otel-plugin
+./scripts/install.sh --refresh
+```
 
 ## 开发命令
 

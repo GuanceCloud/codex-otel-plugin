@@ -35,10 +35,10 @@ src/codex-otlp.js / src/proto.js 编码 OTLP protobuf
 POST <endpoint>/<tracePath>
 ```
 
-Hook 命令：
+安装脚本会写入的 Hook 命令：
 
-```bash
-node /home/liurui/code/codex-otel-plugin/src/codex-hook-wrapper.js
+```text
+node <repo>/src/codex-hook-wrapper.js
 ```
 
 ## 运行要求
@@ -46,7 +46,49 @@ node /home/liurui/code/codex-otel-plugin/src/codex-hook-wrapper.js
 - Node.js >= 22
 - 无需安装运行时依赖
 
-常用命令：
+## 安装
+
+```bash
+git clone https://github.com/GuanceCloud/codex-otel-plugin.git
+cd codex-otel-plugin
+./scripts/install.sh --refresh
+```
+
+安装脚本会完成：
+
+- 创建本地 Codex marketplace：`~/.codex/gtrace-codex-observe`
+- 写入插件：`tracing@gtrace-codex-observe`
+- 写入 Stop hook：`node <repo>/src/codex-hook-wrapper.js`
+- 通过 Codex CLI 刷新插件缓存
+
+然后配置 `~/.codex/gtrace.json`：
+
+```json
+{
+  "enabled": true,
+  "endpoint": "https://llm-openway.guance.com",
+  "tracePath": "v1/write/otel-llm",
+  "headers": {
+    "X-Token": "<token>",
+    "To-Headless": "true"
+  },
+  "debug": true
+}
+```
+
+配置完成后重启 Codex，让 Stop hook 重新加载。
+
+## 升级
+
+```bash
+cd /path/to/codex-otel-plugin
+git pull --ff-only
+./scripts/install.sh --refresh
+```
+
+升级脚本会重写插件和 hook 配置，并刷新 Codex 插件缓存；不会覆盖 `~/.codex/gtrace.json`。
+
+## 开发命令
 
 ```bash
 npm test
@@ -67,21 +109,6 @@ Hook 会读取以下配置：
 1. `~/.codex/gtrace.json`
 2. 当前项目下的 `.codex/gtrace.json`
 3. 环境变量覆盖
-
-推荐配置：
-
-```json
-{
-  "enabled": true,
-  "endpoint": "https://llm-openway.guance.com",
-  "tracePath": "v1/write/otel-llm",
-  "headers": {
-    "X-Token": "<token>",
-    "To-Headless": "true"
-  },
-  "debug": true
-}
-```
 
 本地调试配置：
 

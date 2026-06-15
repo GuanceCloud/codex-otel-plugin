@@ -24,6 +24,7 @@ README.md                 项目使用说明
 docs/traces.md            Trace/span/字段/token/UI 展示设计说明
 AGENTS.md                 Agent 维护指令
 package.json              Node.js 脚本与项目元信息
+scripts/install.sh        本地 Codex marketplace/plugin 安装与升级脚本
 src/codex-hook-wrapper.js Codex Stop hook 入口和远端上报
 src/codex-config.js       gtrace.json 与环境变量解析
 src/codex-parse.js        Codex rollout JSONL 解析

@@ -38,7 +38,7 @@ POST <endpoint>/<tracePath>
 安装脚本会写入的 Hook 命令：
 
 ```text
-node <repo>/src/codex-hook-wrapper.js
+node ~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>/src/codex-hook-wrapper.js
 ```
 
 ## 运行要求
@@ -69,12 +69,11 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 
 安装脚本会完成：
 
-- 下载插件文件到 `~/.codex/codex-otel-plugin`
 - 创建本地 Codex marketplace：`~/.codex/codex-otel-plugin`
 - 写入插件：`tracing@codex-otel-plugin`
-- 写入 Stop hook：`node ~/.codex/codex-otel-plugin/src/codex-hook-wrapper.js`
+- 写入 Stop hook：`node ~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>/src/codex-hook-wrapper.js`
 - 写入 Codex 配置：`~/.codex/config.toml`
-- 同步 Codex 插件缓存：`~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>`
+- 同步完整运行文件到 Codex 插件缓存：`~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>`
 - 写入上报配置：`~/.codex/gtrace.json`
 
 `~/.codex/config.toml` 会写入以下配置，用于让 Codex 启用插件：

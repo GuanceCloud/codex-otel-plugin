@@ -232,10 +232,28 @@ if [[ -z "$TRACE_PATH" && ( -n "$ENDPOINT" || ! -f "$CONFIG_FILE" || "$TRACE_PAT
 fi
 
 VERSION="$("$NODE_BIN" -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.0')"
-HOOK_COMMAND="$NODE_BIN $REPO_ROOT/src/codex-hook-wrapper.js"
 CACHE_PLUGIN_ROOT="$CODEX_HOME/plugins/cache/$MARKETPLACE_NAME/$PLUGIN_NAME/$VERSION"
+CACHE_HOOK_SCRIPT="$CACHE_PLUGIN_ROOT/src/codex-hook-wrapper.js"
+HOOK_COMMAND="$NODE_BIN $CACHE_HOOK_SCRIPT"
 
 mkdir -p "$PLUGIN_ROOT/.codex-plugin" "$PLUGIN_ROOT/hooks" "$MARKETPLACE_ROOT/.agents/plugins"
+
+cleanup_legacy_marketplace_runtime() {
+  if [[ "$MARKETPLACE_ROOT" == "$REPO_ROOT" ]]; then
+    return
+  fi
+  rm -rf \
+    "$MARKETPLACE_ROOT/src" \
+    "$MARKETPLACE_ROOT/scripts" \
+    "$MARKETPLACE_ROOT/test" \
+    "$MARKETPLACE_ROOT/docs" \
+    "$MARKETPLACE_ROOT/README.md" \
+    "$MARKETPLACE_ROOT/AGENTS.md" \
+    "$MARKETPLACE_ROOT/package.json" \
+    "$MARKETPLACE_ROOT/package-lock.json"
+}
+
+cleanup_legacy_marketplace_runtime
 
 cat > "$MARKETPLACE_ROOT/.agents/plugins/marketplace.json" <<JSON
 {
@@ -311,6 +329,11 @@ sync_plugin_cache() {
   rm -rf "$CACHE_PLUGIN_ROOT"
   mkdir -p "$CACHE_PLUGIN_ROOT"
   cp -R "$PLUGIN_ROOT/." "$CACHE_PLUGIN_ROOT/"
+  cp -R "$REPO_ROOT/src" "$CACHE_PLUGIN_ROOT/src"
+  cp "$REPO_ROOT/package.json" "$CACHE_PLUGIN_ROOT/package.json"
+  if [[ -f "$REPO_ROOT/package-lock.json" ]]; then
+    cp "$REPO_ROOT/package-lock.json" "$CACHE_PLUGIN_ROOT/package-lock.json"
+  fi
   log "updated plugin cache: $CACHE_PLUGIN_ROOT"
 }
 

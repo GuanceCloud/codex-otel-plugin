@@ -3,7 +3,6 @@ set -euo pipefail
 
 REPO="${CODEX_OTEL_REPO:-GuanceCloud/codex-otel-plugin}"
 REF="${CODEX_OTEL_VERSION:-${CODEX_OTEL_REF:-main}}"
-INSTALL_DIR="${CODEX_OTEL_INSTALL_DIR:-$HOME/.codex/codex-otel-plugin}"
 ARCHIVE_URL="${CODEX_OTEL_ARCHIVE_URL:-https://github.com/$REPO/archive/$REF.tar.gz}"
 
 case "${1:-}" in
@@ -30,7 +29,6 @@ Install options are passed to scripts/install.sh:
 Environment variables:
   CODEX_OTEL_REPO         GitHub repo. Default: GuanceCloud/codex-otel-plugin
   CODEX_OTEL_VERSION      Git ref/tag. Default: main
-  CODEX_OTEL_INSTALL_DIR  Install directory. Default: ~/.codex/codex-otel-plugin
   CODEX_OTEL_ARCHIVE_URL  Full tar.gz URL override.
   CODEX_OTEL_NODE         Node.js executable path when node is not in PATH.
 HELP
@@ -113,18 +111,6 @@ check_node_version() {
   fi
 }
 
-safe_replace_dir() {
-  local src="$1"
-  local dest="$2"
-  if [[ -z "$dest" || "$dest" == "/" || "$dest" == "$HOME" ]]; then
-    echo "Refusing unsafe install dir: $dest" >&2
-    exit 1
-  fi
-  mkdir -p "$(dirname "$dest")"
-  rm -rf "$dest"
-  mv "$src" "$dest"
-}
-
 need curl
 need tar
 need gzip
@@ -139,7 +125,5 @@ mkdir -p "$TMP_DIR/repo"
 echo "Downloading $ARCHIVE_URL"
 curl -fsSL "$ARCHIVE_URL" | tar -xz --strip-components=1 -C "$TMP_DIR/repo"
 
-safe_replace_dir "$TMP_DIR/repo" "$INSTALL_DIR"
-
-echo "Installed files to $INSTALL_DIR"
-bash "$INSTALL_DIR/scripts/install.sh" --refresh "$@"
+echo "Installing plugin from temporary archive"
+bash "$TMP_DIR/repo/scripts/install.sh" --refresh "$@"

@@ -3,39 +3,165 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CONFIG_FILE="${GTRACE_CONFIG_FILE:-$CODEX_HOME/gtrace.json}"
 MARKETPLACE_NAME="${MARKETPLACE_NAME:-gtrace-codex-observe}"
 PLUGIN_NAME="${PLUGIN_NAME:-tracing}"
 MARKETPLACE_ROOT="${MARKETPLACE_ROOT:-$CODEX_HOME/$MARKETPLACE_NAME}"
 PLUGIN_ROOT="$MARKETPLACE_ROOT/plugins/$PLUGIN_NAME"
 REFRESH=false
+WRITE_CONFIG=1
+INSTALL_TYPE="${CODEX_OTEL_INSTALL_TYPE:-gtrace}"
+ENDPOINT="${GTRACE_ENDPOINT:-${CODEX_OTEL_ENDPOINT:-}}"
+TRACE_PATH="${GTRACE_TRACE_PATH:-${CODEX_OTEL_TRACE_PATH:-}}"
+X_TOKEN="${GTRACE_X_TOKEN:-${X_TOKEN:-}}"
+DEBUG="${GTRACE_CODEX_DEBUG:-true}"
+TAGS=()
+HEADERS=()
+TRACE_PATH_EXPLICIT=0
 
-for arg in "$@"; do
-  case "$arg" in
+if [[ -n "$TRACE_PATH" ]]; then
+  TRACE_PATH_EXPLICIT=1
+fi
+
+log() {
+  printf '[install] %s\n' "$1"
+}
+
+usage() {
+  cat <<HELP
+Usage:
+  scripts/install.sh [--refresh] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--trace-path PATH] [--tag KEY=VALUE] [--no-config]
+
+Options:
+  --refresh        Remove and re-add the installed plugin cache through Codex CLI.
+  --type           Config preset. Default: gtrace. Values: gtrace, otlp.
+  --endpoint       Receiver base URL, for example https://llm-openway.guance.com.
+  --x-token        Dataway/GTrace X-Token. The value is written to gtrace.json and never printed.
+  --trace-path     Trace route. Defaults to v1/write/otel-llm for gtrace and v1/traces for otlp.
+  --header         Extra HTTP header as KEY=VALUE. Can be repeated.
+  --tag            Metadata tag as KEY=VALUE. Can be repeated.
+  --config-file    Config file. Default: $CODEX_HOME/gtrace.json.
+  --no-config      Install plugin files only; do not create or update gtrace.json.
+
+Environment variables:
+  CODEX_HOME              Codex home. Default: ~/.codex
+  CODEX_OTEL_ENDPOINT     Same as --endpoint
+  GTRACE_ENDPOINT         Same as --endpoint
+  CODEX_OTEL_TRACE_PATH   Same as --trace-path
+  GTRACE_TRACE_PATH       Same as --trace-path
+  GTRACE_X_TOKEN          Same as --x-token
+  X_TOKEN                 Same as --x-token
+  GTRACE_CONFIG_FILE      Same as --config-file
+HELP
+}
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
     --refresh|--reinstall)
       REFRESH=true
       ;;
+    --no-config)
+      WRITE_CONFIG=0
+      ;;
+    --type)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--type requires a value" >&2; exit 2; }
+      INSTALL_TYPE="$1"
+      ;;
+    --type=*)
+      INSTALL_TYPE="${1#*=}"
+      ;;
+    --endpoint)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--endpoint requires a URL" >&2; exit 2; }
+      ENDPOINT="$1"
+      ;;
+    --endpoint=*)
+      ENDPOINT="${1#*=}"
+      ;;
+    --trace-path)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--trace-path requires a path" >&2; exit 2; }
+      TRACE_PATH="$1"
+      TRACE_PATH_EXPLICIT=1
+      ;;
+    --trace-path=*)
+      TRACE_PATH="${1#*=}"
+      TRACE_PATH_EXPLICIT=1
+      ;;
+    --x-token)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--x-token requires a token" >&2; exit 2; }
+      X_TOKEN="$1"
+      ;;
+    --x-token=*)
+      X_TOKEN="${1#*=}"
+      ;;
+    --header)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--header requires KEY=VALUE" >&2; exit 2; }
+      HEADERS+=("$1")
+      ;;
+    --header=*)
+      HEADERS+=("${1#*=}")
+      ;;
+    --tag)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--tag requires KEY=VALUE" >&2; exit 2; }
+      TAGS+=("$1")
+      ;;
+    --tag=*)
+      TAGS+=("${1#*=}")
+      ;;
+    --config-file)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--config-file requires a path" >&2; exit 2; }
+      CONFIG_FILE="$1"
+      ;;
+    --config-file=*)
+      CONFIG_FILE="${1#*=}"
+      ;;
+    --debug)
+      DEBUG=true
+      ;;
+    --no-debug)
+      DEBUG=false
+      ;;
     -h|--help)
-      cat <<HELP
-Usage: scripts/install.sh [--refresh]
-
-Creates the local Codex marketplace and plugin files for:
-  $PLUGIN_NAME@$MARKETPLACE_NAME
-
-Options:
-  --refresh    Remove and re-add the installed plugin cache through Codex CLI.
-HELP
+      usage
       exit 0
       ;;
     *)
-      echo "Unknown argument: $arg" >&2
+      echo "Unknown argument: $1" >&2
       exit 2
       ;;
   esac
+  shift
 done
 
 if [[ ! -f "$REPO_ROOT/src/codex-hook-wrapper.js" ]]; then
   echo "Cannot find src/codex-hook-wrapper.js under $REPO_ROOT" >&2
   exit 1
+fi
+
+case "$INSTALL_TYPE" in
+  gtrace|otlp|otel)
+    ;;
+  *)
+    echo "Unsupported --type: $INSTALL_TYPE. Supported values: gtrace, otlp" >&2
+    exit 2
+    ;;
+esac
+if [[ "$INSTALL_TYPE" == "otel" ]]; then
+  INSTALL_TYPE="otlp"
+fi
+
+if [[ -z "$TRACE_PATH" && ( -n "$ENDPOINT" || ! -f "$CONFIG_FILE" || "$TRACE_PATH_EXPLICIT" -eq 1 ) ]]; then
+  if [[ "$INSTALL_TYPE" == "gtrace" ]]; then
+    TRACE_PATH="v1/write/otel-llm"
+  else
+    TRACE_PATH="v1/traces"
+  fi
 fi
 
 VERSION="$(node -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.0')"
@@ -112,6 +238,103 @@ echo "Wrote local marketplace: $MARKETPLACE_ROOT"
 echo "Wrote plugin: $PLUGIN_ROOT"
 echo "Hook command: $HOOK_COMMAND"
 
+write_config() {
+  local tags_json='[]'
+  local headers_json='[]'
+  if [[ "${#TAGS[@]}" -gt 0 ]]; then
+    tags_json="$(printf '%s\n' "${TAGS[@]}" | node -e 'const fs=require("fs"); const lines=fs.readFileSync(0,"utf8").split(/\n/).map(s=>s.trim()).filter(Boolean); process.stdout.write(JSON.stringify(lines));')"
+  fi
+  if [[ "${#HEADERS[@]}" -gt 0 ]]; then
+    headers_json="$(printf '%s\n' "${HEADERS[@]}" | node -e 'const fs=require("fs"); const lines=fs.readFileSync(0,"utf8").split(/\n/).map(s=>s.trim()).filter(Boolean); process.stdout.write(JSON.stringify(lines));')"
+  fi
+
+  GTRACE_CONFIG_FILE_RUNTIME="$CONFIG_FILE" \
+  GTRACE_ENDPOINT_RUNTIME="$ENDPOINT" \
+  GTRACE_TRACE_PATH_RUNTIME="$TRACE_PATH" \
+  GTRACE_INSTALL_TYPE_RUNTIME="$INSTALL_TYPE" \
+  GTRACE_X_TOKEN_RUNTIME="$X_TOKEN" \
+  GTRACE_DEBUG_RUNTIME="$DEBUG" \
+  GTRACE_TAGS_RUNTIME="$tags_json" \
+  GTRACE_HEADERS_RUNTIME="$headers_json" \
+  node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const configFile = process.env.GTRACE_CONFIG_FILE_RUNTIME;
+const endpoint = process.env.GTRACE_ENDPOINT_RUNTIME || "";
+const tracePath = process.env.GTRACE_TRACE_PATH_RUNTIME || "";
+const installType = process.env.GTRACE_INSTALL_TYPE_RUNTIME || "gtrace";
+const xToken = process.env.GTRACE_X_TOKEN_RUNTIME || "";
+const debug = process.env.GTRACE_DEBUG_RUNTIME !== "false";
+const tags = JSON.parse(process.env.GTRACE_TAGS_RUNTIME || "[]");
+const extraHeaders = JSON.parse(process.env.GTRACE_HEADERS_RUNTIME || "[]");
+
+let config = {};
+if (fs.existsSync(configFile)) {
+  const raw = fs.readFileSync(configFile, "utf8").trim();
+  if (raw) config = JSON.parse(raw);
+}
+
+config.enabled = true;
+if (endpoint) config.endpoint = endpoint;
+if (tracePath) config.tracePath = tracePath;
+config.debug = debug;
+config.headers = config.headers && typeof config.headers === "object" && !Array.isArray(config.headers)
+  ? config.headers
+  : {};
+
+if (installType === "gtrace") {
+  config.headers["To-Headless"] ??= "true";
+}
+if (xToken) {
+  config.headers["X-Token"] = xToken;
+}
+for (const header of extraHeaders) {
+  const [key, ...rest] = String(header).split("=");
+  if (!key || rest.length === 0) continue;
+  config.headers[key] = rest.join("=");
+}
+if (Object.keys(config.headers).length === 0) {
+  delete config.headers;
+}
+
+config.tags = Array.isArray(config.tags) ? config.tags : [];
+config.metadata = config.metadata && typeof config.metadata === "object" && !Array.isArray(config.metadata)
+  ? config.metadata
+  : {};
+for (const tag of tags) {
+  const [key, ...rest] = String(tag).split("=");
+  if (!key || rest.length === 0) continue;
+  const value = rest.join("=");
+  if (!config.tags.includes(tag)) config.tags.push(tag);
+  config.metadata[key] = value;
+}
+if (config.tags.length === 0) delete config.tags;
+if (Object.keys(config.metadata).length === 0) delete config.metadata;
+
+fs.mkdirSync(path.dirname(configFile), { recursive: true });
+fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+NODE
+}
+
+if [[ "$WRITE_CONFIG" -eq 1 ]]; then
+  if [[ -n "$ENDPOINT" || -f "$CONFIG_FILE" ]]; then
+    write_config
+    log "updated $CONFIG_FILE"
+    if [[ -n "$ENDPOINT" ]]; then
+      log "configured endpoint: $ENDPOINT"
+    fi
+    log "configured trace path: $TRACE_PATH"
+    if [[ -n "$X_TOKEN" ]]; then
+      log "configured X-Token: <redacted>"
+    fi
+  else
+    log "skipped config because --endpoint was not provided"
+  fi
+else
+  log "skipped config because --no-config was set"
+fi
+
 if ! command -v codex >/dev/null 2>&1; then
   cat <<EOF
 
@@ -143,6 +366,6 @@ fi
 cat <<EOF
 
 Next steps:
-  1. Configure $CODEX_HOME/gtrace.json
+  1. Configure $CONFIG_FILE if it was not written by this installer
   2. Restart Codex so the Stop hook is reloaded
 EOF

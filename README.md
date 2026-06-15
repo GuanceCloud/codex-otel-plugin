@@ -52,7 +52,10 @@ node <repo>/src/codex-hook-wrapper.js
 推荐使用远程安装器，不需要 `git clone`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+  | bash -s -- latest \
+      --endpoint https://llm-openway.guance.com \
+      --x-token <token>
 ```
 
 安装脚本会完成：
@@ -61,9 +64,10 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 - 创建本地 Codex marketplace：`~/.codex/gtrace-codex-observe`
 - 写入插件：`tracing@gtrace-codex-observe`
 - 写入 Stop hook：`node ~/.codex/codex-otel-plugin/src/codex-hook-wrapper.js`
+- 写入配置：`~/.codex/gtrace.json`
 - 通过 Codex CLI 刷新插件缓存
 
-然后配置 `~/.codex/gtrace.json`：
+上面的命令会生成：
 
 ```json
 {
@@ -80,12 +84,20 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 
 配置完成后重启 Codex，让 Stop hook 重新加载。
 
-## 升级
-
-升级也使用同一条命令：
+如果只安装文件、稍后手动配置：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+  | bash -s -- latest --no-config
+```
+
+## 升级
+
+升级也使用同一条命令。已安装过的环境可以省略 `--endpoint` 和 `--x-token`，脚本会复用现有 `~/.codex/gtrace.json`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+  | bash -s -- latest
 ```
 
 升级脚本会重新下载插件文件、重写插件和 hook 配置，并刷新 Codex 插件缓存；不会覆盖 `~/.codex/gtrace.json`。
@@ -93,7 +105,28 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh | CODEX_OTEL_VERSION=v0.1.0 bash
+curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+  | bash -s -- v0.1.0
+```
+
+安装参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `latest` / `vX.Y.Z` / `X.Y.Z` | 安装版本，默认 `latest` |
+| `--endpoint URL` | 接收端基础地址，例如 `https://llm-openway.guance.com` |
+| `--x-token TOKEN` | 写入 `headers.X-Token` |
+| `--trace-path PATH` | Trace 写入路径，GTrace 默认 `v1/write/otel-llm` |
+| `--type gtrace|otlp` | 配置预设，默认 `gtrace` |
+| `--header KEY=VALUE` | 追加 HTTP header，可重复 |
+| `--tag KEY=VALUE` | 追加 metadata/tag，可重复 |
+| `--no-config` | 只安装插件，不写 `gtrace.json` |
+
+如果仓库是 private，`raw.githubusercontent.com` 会返回 404。此时需要先将仓库公开，或使用可访问的 tar 包地址：
+
+```bash
+curl -fsSL <installer-url> \
+  | CODEX_OTEL_ARCHIVE_URL=<plugin-tar-gz-url> bash -s -- latest --endpoint <endpoint> --x-token <token>
 ```
 
 开发安装：
@@ -101,7 +134,7 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 ```bash
 git clone https://github.com/GuanceCloud/codex-otel-plugin.git
 cd codex-otel-plugin
-./scripts/install.sh --refresh
+./scripts/install.sh --refresh --endpoint https://llm-openway.guance.com --x-token <token>
 ```
 
 ## 开发命令

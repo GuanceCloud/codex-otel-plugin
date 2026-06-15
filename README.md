@@ -1,0 +1,262 @@
+# codex-otel-plugin
+
+`codex-otel-plugin` 是一个 Codex 可观测采集插件。它通过 Codex Stop hook 读取 rollout transcript，将一次 Codex turn 转换为 OpenTelemetry OTLP Trace，并通过 HTTP/protobuf 上报。
+
+当前实现只使用 Node.js 内置模块，没有运行时 npm 第三方依赖。
+
+## 能力概览
+
+- 采集 Codex turn、模型调用、工具调用和 token usage。
+- 生成 `agent_run`、`llm`、`tool:<name>` 三类 span。
+- 使用 OTLP Trace HTTP/protobuf 上报。
+- 支持 Dataway/GTrace 风格的 `endpoint + tracePath + headers` 配置。
+- 提供本地 ingest/debug server，便于接收和检查 OTLP JSON/protobuf 数据。
+
+Trace 字段、Span name、token 口径和 UI 展示建议见 [docs/traces.md](docs/traces.md)。
+
+## 工作流程
+
+```text
+Codex Stop hook
+    |
+    v
+src/codex-hook-wrapper.js
+    |
+    v
+src/codex-parse.js 解析 rollout JSONL
+    |
+    v
+src/codex-collector.js 生成 span
+    |
+    v
+src/codex-otlp.js / src/proto.js 编码 OTLP protobuf
+    |
+    v
+POST <endpoint>/<tracePath>
+```
+
+Hook 命令：
+
+```bash
+node /home/liurui/code/codex-otel-plugin/src/codex-hook-wrapper.js
+```
+
+## 运行要求
+
+- Node.js >= 22
+- 无需安装运行时依赖
+
+常用命令：
+
+```bash
+npm test
+npm start
+npm run codex:hook
+```
+
+`npm start` 会启动本地调试服务，默认监听：
+
+```text
+http://localhost:3030
+```
+
+## Codex Hook 配置
+
+Hook 会读取以下配置：
+
+1. `~/.codex/gtrace.json`
+2. 当前项目下的 `.codex/gtrace.json`
+3. 环境变量覆盖
+
+推荐配置：
+
+```json
+{
+  "enabled": true,
+  "endpoint": "https://llm-openway.guance.com",
+  "tracePath": "v1/write/otel-llm",
+  "headers": {
+    "X-Token": "<token>",
+    "To-Headless": "true"
+  },
+  "debug": true
+}
+```
+
+本地调试配置：
+
+```json
+{
+  "enabled": true,
+  "endpoint": "http://localhost:3030",
+  "tracePath": "api/public/otel/v1/traces",
+  "debug": true
+}
+```
+
+如果 `endpoint` 已经是完整 OTLP traces 地址，可以直接配置 `otel_traces_url`：
+
+```json
+{
+  "enabled": true,
+  "otel_traces_url": "http://localhost:4318/v1/traces",
+  "debug": true
+}
+```
+
+兼容 Basic Auth：
+
+```json
+{
+  "enabled": true,
+  "endpoint": "http://localhost:3030",
+  "tracePath": "api/public/otel/v1/traces",
+  "public_key": "pk-test",
+  "secret_key": "sk-test"
+}
+```
+
+如果 `headers.Authorization` 已配置，hook 会优先使用该值，不再自动覆盖。
+
+## 环境变量
+
+常用覆盖项：
+
+```bash
+export GTRACE_CODEX_ENABLED=true
+export GTRACE_ENDPOINT="http://localhost:4318"
+export GTRACE_TRACE_PATH="v1/traces"
+export GTRACE_OTEL_TRACES_URL="http://localhost:4318/v1/traces"
+export GTRACE_CODEX_DEBUG=true
+```
+
+认证相关：
+
+```bash
+export GTRACE_PUBLIC_KEY="pk-test"
+export GTRACE_SECRET_KEY="sk-test"
+```
+
+排查相关：
+
+```bash
+export GTRACE_CODEX_HOOK_LOG_FILE="$HOME/.codex/gtrace-hook.log"
+export GTRACE_CODEX_FAIL_ON_ERROR=true
+```
+
+## 本地调试服务
+
+启动：
+
+```bash
+npm start
+```
+
+接口：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/health` | 本地服务健康检查 |
+| `GET` | `/api/public/health` | OTLP ingest 健康检查 |
+| `POST` | `/api/public/otel/v1/traces` | 接收 OTLP Trace JSON/protobuf |
+| `POST` | `/api/gtrace/v1/codex-spans` | 接收原生 JSON 调试 span |
+| `GET` | `/traces?limit=50` | 查看最近规范化 span |
+
+本地落盘目录：
+
+```text
+data/batches/*.json
+data/spans.ndjson
+```
+
+`data/` 只用于调试，不是字段规范来源。
+
+## Trace 数据模型
+
+一轮 Codex 请求生成一棵 trace 树：
+
+```text
+agent_run
+├── llm
+│   ├── tool:exec_command
+│   └── tool:apply_patch
+├── llm
+└── llm
+```
+
+核心约定：
+
+- `agent_run` 表示一次 Codex turn 的根 span。
+- `llm` 表示一次模型调用。
+- `tool:<name>` 表示一次工具调用。
+- 字段使用扁平 canonical tag。
+- 模型字段统一使用 `model_name`。
+- `llm` span 的 `usage_*` 是单次模型调用口径。
+- `agent_run` span 的 `usage_*` 是当前 turn 汇总口径。
+- 只有启动上下文、没有真实用户输入、模型输出、工具调用或 token usage 的空白 turn 不会上报。
+
+详细字段说明见 [docs/traces.md](docs/traces.md)。
+
+## 验证
+
+修改代码或字段口径后至少运行：
+
+```bash
+npm test
+npm ls --all
+```
+
+期望结果：
+
+```text
+5 tests passed
+```
+
+```text
+gtrace@0.1.0 /home/liurui/code/codex-otel-plugin
+└── (empty)
+```
+
+测试覆盖：
+
+- OTLP JSON ingest。
+- OTLP protobuf ingest。
+- Codex hook 解析 rollout 并上报 OTLP protobuf。
+- Stop hook 早于 `task_complete` 写入时的 completed 状态推断。
+- 空白启动 turn 过滤，不生成 OTLP span。
+
+## 排查
+
+查看 hook 日志：
+
+```bash
+tail -n 100 ~/.codex/gtrace-hook.log
+```
+
+查看本地 ingest 数据：
+
+```bash
+curl "http://localhost:3030/traces?limit=20"
+tail -n 20 data/spans.ndjson
+ls -lt data/batches | head
+```
+
+查看已上传 turn 标记：
+
+```bash
+find ~/.codex/sessions -name "*.gtrace" -type f
+```
+
+如果 Stop hook 报错，优先检查：
+
+- `~/.codex/gtrace.json` 是否启用。
+- `endpoint`、`tracePath` 或 `otel_traces_url` 是否指向正确 OTLP Trace 接口。
+- 认证 header 是否正确。
+- `~/.codex/gtrace-hook.log` 中的 HTTP 状态码和错误信息。
+
+## 维护约束
+
+- 不提交真实 token、真实用户输入或敏感 rollout 内容。
+- 保持无运行时第三方依赖，除非明确改变项目约束。
+- 字段命名以 [docs/traces.md](docs/traces.md) 为准。
+- 修改 span 层级、字段名或 token 口径时，同步更新测试和文档。

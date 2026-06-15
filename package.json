@@ -1,0 +1,15 @@
+{
+  "name": "gtrace",
+  "version": "0.1.0",
+  "description": "OTLP trace ingest and Codex hook collector.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "codex:hook": "node src/codex-hook-wrapper.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

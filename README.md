@@ -70,21 +70,21 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 安装脚本会完成：
 
 - 下载插件文件到 `~/.codex/codex-otel-plugin`
-- 创建本地 Codex marketplace：`~/.codex/gtrace-codex-observe`
-- 写入插件：`tracing@gtrace-codex-observe`
+- 创建本地 Codex marketplace：`~/.codex/codex-otel-plugin`
+- 写入插件：`tracing@codex-otel-plugin`
 - 写入 Stop hook：`node ~/.codex/codex-otel-plugin/src/codex-hook-wrapper.js`
 - 写入 Codex 配置：`~/.codex/config.toml`
-- 同步 Codex 插件缓存：`~/.codex/plugins/cache/gtrace-codex-observe/tracing/<version>`
+- 同步 Codex 插件缓存：`~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>`
 - 写入上报配置：`~/.codex/gtrace.json`
 
 `~/.codex/config.toml` 会写入以下配置，用于让 Codex 启用插件：
 
 ```toml
-[marketplaces.gtrace-codex-observe]
+[marketplaces.codex-otel-plugin]
 source_type = "local"
-source = "/home/<user>/.codex/gtrace-codex-observe"
+source = "/home/<user>/.codex/codex-otel-plugin"
 
-[plugins."tracing@gtrace-codex-observe"]
+[plugins."tracing@codex-otel-plugin"]
 enabled = true
 ```
 

@@ -23,6 +23,8 @@ Install options are passed to scripts/install.sh:
   --trace-path PATH
   --header KEY=VALUE
   --tag KEY=VALUE
+  --config-file PATH
+  --codex-config PATH
   --no-config
 
 Environment variables:

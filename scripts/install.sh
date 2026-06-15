@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$CODEX_HOME/config.toml}"
 CONFIG_FILE="${GTRACE_CONFIG_FILE:-$CODEX_HOME/gtrace.json}"
 MARKETPLACE_NAME="${MARKETPLACE_NAME:-gtrace-codex-observe}"
 PLUGIN_NAME="${PLUGIN_NAME:-tracing}"
@@ -93,6 +94,7 @@ Options:
   --header         Extra HTTP header as KEY=VALUE. Can be repeated.
   --tag            Metadata tag as KEY=VALUE. Can be repeated.
   --config-file    Config file. Default: $CODEX_HOME/gtrace.json.
+  --codex-config   Codex config file. Default: $CODEX_HOME/config.toml.
   --no-config      Install plugin files only; do not create or update gtrace.json.
 
 Environment variables:
@@ -105,6 +107,7 @@ Environment variables:
   X_TOKEN                 Same as --x-token
   CODEX_OTEL_NODE         Node.js executable path when node is not in PATH
   GTRACE_CONFIG_FILE      Same as --config-file
+  CODEX_CONFIG_FILE       Same as --codex-config
 HELP
 }
 
@@ -174,6 +177,14 @@ while [[ "$#" -gt 0 ]]; do
     --config-file=*)
       CONFIG_FILE="${1#*=}"
       ;;
+    --codex-config)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--codex-config requires a path" >&2; exit 2; }
+      CODEX_CONFIG_FILE="$1"
+      ;;
+    --codex-config=*)
+      CODEX_CONFIG_FILE="${1#*=}"
+      ;;
     --debug)
       DEBUG=true
       ;;
@@ -222,6 +233,7 @@ fi
 
 VERSION="$("$NODE_BIN" -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.0')"
 HOOK_COMMAND="$NODE_BIN $REPO_ROOT/src/codex-hook-wrapper.js"
+CACHE_PLUGIN_ROOT="$CODEX_HOME/plugins/cache/$MARKETPLACE_NAME/$PLUGIN_NAME/$VERSION"
 
 mkdir -p "$PLUGIN_ROOT/.codex-plugin" "$PLUGIN_ROOT/hooks" "$MARKETPLACE_ROOT/.agents/plugins"
 
@@ -293,6 +305,77 @@ JSON
 echo "Wrote local marketplace: $MARKETPLACE_ROOT"
 echo "Wrote plugin: $PLUGIN_ROOT"
 echo "Hook command: $HOOK_COMMAND"
+
+sync_plugin_cache() {
+  mkdir -p "$(dirname "$CACHE_PLUGIN_ROOT")"
+  rm -rf "$CACHE_PLUGIN_ROOT"
+  mkdir -p "$CACHE_PLUGIN_ROOT"
+  cp -R "$PLUGIN_ROOT/." "$CACHE_PLUGIN_ROOT/"
+  log "updated plugin cache: $CACHE_PLUGIN_ROOT"
+}
+
+write_codex_config() {
+  CODEX_CONFIG_FILE_RUNTIME="$CODEX_CONFIG_FILE" \
+  CODEX_MARKETPLACE_NAME_RUNTIME="$MARKETPLACE_NAME" \
+  CODEX_MARKETPLACE_ROOT_RUNTIME="$MARKETPLACE_ROOT" \
+  CODEX_PLUGIN_SELECTOR_RUNTIME="$PLUGIN_NAME@$MARKETPLACE_NAME" \
+  "$NODE_BIN" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const configFile = process.env.CODEX_CONFIG_FILE_RUNTIME;
+const marketplaceName = process.env.CODEX_MARKETPLACE_NAME_RUNTIME;
+const marketplaceRoot = process.env.CODEX_MARKETPLACE_ROOT_RUNTIME;
+const pluginSelector = process.env.CODEX_PLUGIN_SELECTOR_RUNTIME;
+
+function tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function removeSection(source, header) {
+  const lines = source.split(/\n/);
+  const out = [];
+  let skipping = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\[[^\]]+\]/.test(trimmed)) {
+      skipping = trimmed === header;
+      if (skipping) continue;
+    }
+    if (!skipping) out.push(line);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+fs.mkdirSync(path.dirname(configFile), { recursive: true });
+let content = "";
+if (fs.existsSync(configFile)) {
+  content = fs.readFileSync(configFile, "utf8");
+}
+
+const marketplaceHeader = `[marketplaces.${marketplaceName}]`;
+const quotedMarketplaceHeader = `[marketplaces.${tomlString(marketplaceName)}]`;
+const pluginHeader = `[plugins.${tomlString(pluginSelector)}]`;
+content = removeSection(content, marketplaceHeader);
+content = removeSection(content, quotedMarketplaceHeader);
+content = removeSection(content, pluginHeader);
+
+const nextSections = [
+  `${marketplaceHeader}
+source_type = "local"
+source = ${tomlString(marketplaceRoot)}`,
+  `${pluginHeader}
+enabled = true`,
+];
+
+const next = `${content.trimEnd()}${content.trim() ? "\n\n" : ""}${nextSections.join("\n\n")}\n`;
+fs.writeFileSync(configFile, next, "utf8");
+NODE
+}
+
+sync_plugin_cache
+write_codex_config
+log "updated Codex config: $CODEX_CONFIG_FILE"
 
 write_config() {
   local tags_json='[]'
@@ -394,9 +477,12 @@ fi
 if ! command -v codex >/dev/null 2>&1; then
   cat <<EOF
 
-Codex CLI was not found. After Codex is available, run:
-  codex plugin marketplace add "$MARKETPLACE_ROOT"
-  codex plugin add "$PLUGIN_NAME@$MARKETPLACE_NAME"
+Codex CLI was not found, so the installer skipped the optional plugin refresh command.
+The installer already wrote $CODEX_CONFIG_FILE and synced the plugin cache.
+
+Next steps:
+  1. Configure $CONFIG_FILE if it was not written by this installer
+  2. Restart Codex so the Stop hook is reloaded
 EOF
   exit 0
 fi
@@ -413,7 +499,8 @@ if ! codex plugin add "$PLUGIN_NAME@$MARKETPLACE_NAME"; then
   cat <<EOF
 
 Plugin files were written, but Codex CLI did not add the plugin automatically.
-If the plugin is already installed, run this to refresh the cache:
+The installer already wrote $CODEX_CONFIG_FILE and synced the plugin cache.
+If Codex still does not load the plugin after restart, run this to refresh the cache:
   codex plugin remove "$PLUGIN_NAME@$MARKETPLACE_NAME"
   codex plugin add "$PLUGIN_NAME@$MARKETPLACE_NAME"
 EOF

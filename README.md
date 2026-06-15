@@ -73,8 +73,20 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 - 创建本地 Codex marketplace：`~/.codex/gtrace-codex-observe`
 - 写入插件：`tracing@gtrace-codex-observe`
 - 写入 Stop hook：`node ~/.codex/codex-otel-plugin/src/codex-hook-wrapper.js`
-- 写入配置：`~/.codex/gtrace.json`
-- 通过 Codex CLI 刷新插件缓存
+- 写入 Codex 配置：`~/.codex/config.toml`
+- 同步 Codex 插件缓存：`~/.codex/plugins/cache/gtrace-codex-observe/tracing/<version>`
+- 写入上报配置：`~/.codex/gtrace.json`
+
+`~/.codex/config.toml` 会写入以下配置，用于让 Codex 启用插件：
+
+```toml
+[marketplaces.gtrace-codex-observe]
+source_type = "local"
+source = "/home/<user>/.codex/gtrace-codex-observe"
+
+[plugins."tracing@gtrace-codex-observe"]
+enabled = true
+```
 
 上面的命令会生成：
 
@@ -109,7 +121,7 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
   | bash -s -- latest
 ```
 
-升级脚本会重新下载插件文件、重写插件和 hook 配置，并刷新 Codex 插件缓存；不会覆盖 `~/.codex/gtrace.json`。
+升级脚本会重新下载插件文件、重写插件和 hook 配置，更新 `~/.codex/config.toml` 并同步 Codex 插件缓存；不会覆盖 `~/.codex/gtrace.json`。
 
 安装指定版本：
 
@@ -129,6 +141,8 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 | `--type gtrace|otlp` | 配置预设，默认 `gtrace` |
 | `--header KEY=VALUE` | 追加 HTTP header，可重复 |
 | `--tag KEY=VALUE` | 追加 metadata/tag，可重复 |
+| `--config-file PATH` | 指定上报配置文件，默认 `~/.codex/gtrace.json` |
+| `--codex-config PATH` | 指定 Codex 配置文件，默认 `~/.codex/config.toml` |
 | `--no-config` | 只安装插件，不写 `gtrace.json` |
 
 如果仓库是 private，`raw.githubusercontent.com` 会返回 404。此时需要先将仓库公开，或使用可访问的 tar 包地址：

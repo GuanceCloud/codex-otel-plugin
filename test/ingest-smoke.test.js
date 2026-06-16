@@ -235,7 +235,6 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   );
   const toolSpan = uploadedSpans.find((span) => span.name === "tool:exec_command");
   assert.equal(attrValue(toolSpan.attributes, "tool_command"), "ls");
-  assert.equal(attrValue(toolSpan.attributes, "tool_target_command"), "ls");
   assert.equal(listed.data.at(-1).gtrace.trace.session_id, "sess-basic");
   assert.equal(
     listed.data.find((span) => span.gtrace.observation.type === "llm").gtrace.observation.model_name,

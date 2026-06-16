@@ -337,7 +337,7 @@ agent_run
 - `llm` span 的 `usage_*` 是单次模型调用口径。
 - `agent_run` span 的 `usage_*` 是当前 turn 汇总口径。
 - `assistant` span 不携带 `usage_*`，避免重复计算 token。
-- `tool:*` span 会保留 `tool_call_id`，并从 `args.cmd` 或 `args.command` 提取 `tool_command` / `tool_target_command`，用于区分并行工具调用。
+- `tool:*` span 会保留 `tool_call_id`，并从 `args.cmd` 或 `args.command` 提取 `tool_command`，用于区分并行工具调用。
 - 只有启动上下文、没有真实用户输入、模型输出、工具调用或 token usage 的空白 turn 不会上报。
 
 详细字段说明见 [docs/traces.md](docs/traces.md)。

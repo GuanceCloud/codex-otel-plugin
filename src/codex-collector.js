@@ -385,7 +385,6 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       setAttr(toolAttributes, "tool_name", tc.name || "tool");
       setAttr(toolAttributes, "tool_call_id", tc.callId);
       setAttr(toolAttributes, "tool_command", preview(command, maxChars));
-      setAttr(toolAttributes, "tool_target_command", preview(command, maxChars));
       setAttr(toolAttributes, "tool_args_preview", preview(tc.args, maxChars));
       setAttr(toolAttributes, "tool_result_preview", preview(toText(tc.output), maxChars));
       setAttr(toolAttributes, "tool_result_status", tc.error ? "error" : "completed");

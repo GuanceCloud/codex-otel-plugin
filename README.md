@@ -52,7 +52,7 @@ node ~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>/src/codex-hook-w
 如果 Node.js 已安装但不在非交互 shell 的 `PATH` 中，可以指定 Node 路径：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
   | CODEX_OTEL_NODE=/path/to/node bash -s -- latest --endpoint <endpoint> --x-token <token>
 ```
 
@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 推荐使用远程安装器，不需要 `git clone`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
   | bash -s -- latest \
       --endpoint https://llm-openway.guance.com \
       --x-token <token>
@@ -107,7 +107,7 @@ enabled = true
 如果只安装文件、稍后手动配置：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
   | bash -s -- latest --no-config
 ```
 
@@ -116,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 升级也使用同一条命令。已安装过的环境可以省略 `--endpoint` 和 `--x-token`，脚本会复用现有 `~/.codex/gtrace.json`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
   | bash -s -- latest
 ```
 
@@ -125,7 +125,7 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/scripts/install-release.sh \
+curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
   | bash -s -- v0.1.0
 ```
 
@@ -144,11 +144,11 @@ curl -fsSL https://raw.githubusercontent.com/GuanceCloud/codex-otel-plugin/main/
 | `--codex-config PATH` | 指定 Codex 配置文件，默认 `~/.codex/config.toml` |
 | `--no-config` | 只安装插件，不写 `gtrace.json` |
 
-如果仓库是 private，`raw.githubusercontent.com` 会返回 404。此时需要先将仓库公开，或使用可访问的 tar 包地址：
+如果需要指定自定义 release 资产地址，可以覆盖下载 URL：
 
 ```bash
-curl -fsSL <installer-url> \
-  | CODEX_OTEL_ARCHIVE_URL=<plugin-tar-gz-url> bash -s -- latest --endpoint <endpoint> --x-token <token>
+curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
+  | CODEX_OTEL_ARCHIVE_URL=<plugin-release-tar-gz-url> bash -s -- latest --endpoint <endpoint> --x-token <token>
 ```
 
 开发安装：

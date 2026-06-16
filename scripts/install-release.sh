@@ -2,8 +2,19 @@
 set -euo pipefail
 
 REPO="${CODEX_OTEL_REPO:-GuanceCloud/codex-otel-plugin}"
-REF="${CODEX_OTEL_VERSION:-${CODEX_OTEL_REF:-main}}"
-ARCHIVE_URL="${CODEX_OTEL_ARCHIVE_URL:-https://github.com/$REPO/archive/$REF.tar.gz}"
+REF="${CODEX_OTEL_VERSION:-${CODEX_OTEL_REF:-latest}}"
+RELEASE_ASSET_NAME="${CODEX_OTEL_RELEASE_ASSET_NAME:-codex-otel-plugin.tar.gz}"
+
+release_archive_url() {
+  local ref="$1"
+  if [[ "$ref" == "latest" ]]; then
+    printf 'https://github.com/%s/releases/latest/download/%s' "$REPO" "$RELEASE_ASSET_NAME"
+    return 0
+  fi
+  printf 'https://github.com/%s/releases/download/%s/%s' "$REPO" "$ref" "$RELEASE_ASSET_NAME"
+}
+
+ARCHIVE_URL="${CODEX_OTEL_ARCHIVE_URL:-$(release_archive_url "$REF")}"
 
 case "${1:-}" in
   -h|--help)
@@ -28,8 +39,9 @@ Install options are passed to scripts/install.sh:
 
 Environment variables:
   CODEX_OTEL_REPO         GitHub repo. Default: GuanceCloud/codex-otel-plugin
-  CODEX_OTEL_VERSION      Git ref/tag. Default: main
-  CODEX_OTEL_ARCHIVE_URL  Full tar.gz URL override.
+  CODEX_OTEL_VERSION      Release version. Default: latest
+  CODEX_OTEL_RELEASE_ASSET_NAME  Release asset name. Default: codex-otel-plugin.tar.gz
+  CODEX_OTEL_ARCHIVE_URL  Full release tar.gz URL override.
   CODEX_OTEL_NODE         Node.js executable path when node is not in PATH.
 HELP
     exit 0
@@ -39,7 +51,7 @@ esac
 if [[ "$#" -gt 0 && "$1" != --* ]]; then
   case "$1" in
     latest)
-      REF="main"
+      REF="latest"
       ;;
     v*)
       REF="$1"
@@ -48,7 +60,7 @@ if [[ "$#" -gt 0 && "$1" != --* ]]; then
       REF="v$1"
       ;;
   esac
-  ARCHIVE_URL="${CODEX_OTEL_ARCHIVE_URL:-https://github.com/$REPO/archive/$REF.tar.gz}"
+  ARCHIVE_URL="${CODEX_OTEL_ARCHIVE_URL:-$(release_archive_url "$REF")}"
   shift
 fi
 

@@ -19,17 +19,25 @@ resolve_release_ref() {
   local api_url="${CODEX_OTEL_RELEASE_API_URL:-$(latest_release_api_url)}"
   local response
   local tag
-  response="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api_url")"
+  response="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api_url" 2>/dev/null || true)"
+  if [[ -z "$response" ]]; then
+    printf '%s' "latest"
+    return 0
+  fi
   tag="$(printf '%s' "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
   if [[ -z "$tag" ]]; then
-    echo "Failed to resolve latest release tag from $api_url" >&2
-    exit 1
+    printf '%s' "latest"
+    return 0
   fi
   printf '%s' "$tag"
 }
 
 release_archive_url() {
   local ref="$1"
+  if [[ "$ref" == "latest" ]]; then
+    printf 'https://github.com/%s/releases/latest/download/%s' "$REPO" "$RELEASE_ASSET_NAME"
+    return 0
+  fi
   printf 'https://github.com/%s/releases/download/%s/%s' "$REPO" "$ref" "$RELEASE_ASSET_NAME"
 }
 

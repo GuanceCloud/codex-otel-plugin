@@ -193,7 +193,7 @@ docs/metrics.md
 - `gen_ai.agent.operation.duration`
 - `gen_ai.agent.token.usage`
 
-Metrics 默认带 `session_id` / `session_key`，用于与 trace 侧会话字段对齐；默认不带 `run_id`。不要新增 session 累计指标或 runtime 队列类指标，除非用户明确要求并同步设计去重状态。
+Metrics 默认带 `session_id`，用于与 trace 侧会话字段对齐；默认不带 `session_key` / `run_id`。不要新增 session 累计指标或 runtime 队列类指标，除非用户明确要求并同步设计去重状态。
 
 `usage_context_*` 不生成默认 token metric，避免把完整上下文口径当成本次新增 token 消耗。
 

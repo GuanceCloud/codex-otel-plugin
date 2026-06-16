@@ -86,7 +86,6 @@ function baseAttrs(span) {
   const attributes = {};
   setAttr(attributes, "agent_runtime", span.resource?.agent_runtime ?? span.attributes?.agent_runtime ?? "codex");
   setAttr(attributes, "session_id", span.attributes?.session_id);
-  setAttr(attributes, "session_key", span.attributes?.session_key);
   setAttr(attributes, "provider_name", span.attributes?.provider_name);
   setAttr(attributes, "model_name", span.attributes?.model_name);
   return attributes;

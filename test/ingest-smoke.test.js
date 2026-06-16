@@ -276,7 +276,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     ],
   );
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_id === "sess-basic"));
-  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_key === "sess-basic"));
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_key === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.run_id === undefined));
   assert.deepEqual(
     Array.from(

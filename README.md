@@ -378,7 +378,7 @@ Metrics 与 traces 在同一次 Stop hook 中上报，第一版只从当前 turn
 | `gen_ai.agent.operation.duration` | Histogram | `ms` | `llm` 和 `tool:*` span duration |
 | `gen_ai.agent.token.usage` | Histogram | `{token}` | 每个 `llm` span 的 `usage_*` 字段 |
 
-Metrics 默认带 `session_id` / `session_key`，不带 `run_id`。
+Metrics 默认带 `session_id`，不带 `session_key` / `run_id`。
 
 全局筛选类 tag 建议放在 `resourceAttributes`，trace 和 metrics 会共享同一批 resource attributes。推荐最小组合：
 

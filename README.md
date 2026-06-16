@@ -126,7 +126,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 
 ```bash
 curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
-  | bash -s -- v0.1.1
+  | bash -s -- v0.1.0
 ```
 
 安装参数：
@@ -311,7 +311,7 @@ npm ls --all
 ```
 
 ```text
-gtrace@0.1.1 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.0 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 

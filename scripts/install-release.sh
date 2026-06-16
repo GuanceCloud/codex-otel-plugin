@@ -44,7 +44,7 @@ Usage:
 
 Examples:
   curl -fsSL <installer-url> | bash -s -- latest --endpoint https://llm-openway.guance.com --x-token <token>
-  curl -fsSL <installer-url> | bash -s -- v0.1.1 --no-config
+  curl -fsSL <installer-url> | bash -s -- v0.1.0 --no-config
 
 Install options are passed to scripts/install.sh:
   --type gtrace|otlp

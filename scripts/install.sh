@@ -231,7 +231,7 @@ if [[ -z "$TRACE_PATH" && ( -n "$ENDPOINT" || ! -f "$CONFIG_FILE" || "$TRACE_PAT
   fi
 fi
 
-VERSION="$("$NODE_BIN" -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.1')"
+VERSION="$("$NODE_BIN" -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.0')"
 CACHE_PLUGIN_ROOT="$CODEX_HOME/plugins/cache/$MARKETPLACE_NAME/$PLUGIN_NAME/$VERSION"
 CACHE_HOOK_SCRIPT="$CACHE_PLUGIN_ROOT/src/codex-hook-wrapper.js"
 HOOK_COMMAND="$NODE_BIN $CACHE_HOOK_SCRIPT"

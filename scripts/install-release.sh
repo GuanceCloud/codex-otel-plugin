@@ -5,16 +5,36 @@ REPO="${CODEX_OTEL_REPO:-GuanceCloud/codex-otel-plugin}"
 REF="${CODEX_OTEL_VERSION:-${CODEX_OTEL_REF:-latest}}"
 RELEASE_ASSET_NAME="${CODEX_OTEL_RELEASE_ASSET_NAME:-codex-otel-plugin.tar.gz}"
 
-release_archive_url() {
+latest_release_api_url() {
+  printf 'https://api.github.com/repos/%s/releases/latest' "$REPO"
+}
+
+resolve_release_ref() {
   local ref="$1"
-  if [[ "$ref" == "latest" ]]; then
-    printf 'https://github.com/%s/releases/latest/download/%s' "$REPO" "$RELEASE_ASSET_NAME"
+  if [[ "$ref" != "latest" ]]; then
+    printf '%s' "$ref"
     return 0
   fi
+
+  local api_url="${CODEX_OTEL_RELEASE_API_URL:-$(latest_release_api_url)}"
+  local response
+  local tag
+  response="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api_url")"
+  tag="$(printf '%s' "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  if [[ -z "$tag" ]]; then
+    echo "Failed to resolve latest release tag from $api_url" >&2
+    exit 1
+  fi
+  printf '%s' "$tag"
+}
+
+release_archive_url() {
+  local ref="$1"
   printf 'https://github.com/%s/releases/download/%s/%s' "$REPO" "$ref" "$RELEASE_ASSET_NAME"
 }
 
-ARCHIVE_URL="${CODEX_OTEL_ARCHIVE_URL:-$(release_archive_url "$REF")}"
+RESOLVED_REF="${REF}"
+ARCHIVE_URL="${CODEX_OTEL_ARCHIVE_URL:-}"
 
 case "${1:-}" in
   -h|--help)
@@ -41,6 +61,7 @@ Environment variables:
   CODEX_OTEL_REPO         GitHub repo. Default: GuanceCloud/codex-otel-plugin
   CODEX_OTEL_VERSION      Release version. Default: latest
   CODEX_OTEL_RELEASE_ASSET_NAME  Release asset name. Default: codex-otel-plugin.tar.gz
+  CODEX_OTEL_RELEASE_API_URL     Override latest-release API endpoint.
   CODEX_OTEL_ARCHIVE_URL  Full release tar.gz URL override.
   CODEX_OTEL_NODE         Node.js executable path when node is not in PATH.
 HELP
@@ -60,7 +81,6 @@ if [[ "$#" -gt 0 && "$1" != --* ]]; then
       REF="v$1"
       ;;
   esac
-  ARCHIVE_URL="${CODEX_OTEL_ARCHIVE_URL:-$(release_archive_url "$REF")}"
   shift
 fi
 
@@ -126,6 +146,12 @@ check_node_version() {
 need curl
 need tar
 need gzip
+if [[ -z "$ARCHIVE_URL" ]]; then
+  RESOLVED_REF="$(resolve_release_ref "$REF")"
+  ARCHIVE_URL="$(release_archive_url "$RESOLVED_REF")"
+else
+  RESOLVED_REF="$REF"
+fi
 NODE_BIN="$(resolve_node)"
 check_node_version "$NODE_BIN"
 export CODEX_OTEL_NODE="$NODE_BIN"

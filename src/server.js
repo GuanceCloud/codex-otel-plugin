@@ -4,9 +4,13 @@ import { gunzip, inflate } from "node:zlib";
 import { promisify } from "node:util";
 
 import {
+  decodeExportMetricsRequest,
   decodeExportTraceRequest,
+  decodeJsonExportMetricsRequest,
   decodeJsonExportTraceRequest,
+  encodeExportMetricsResponse,
   encodeExportTraceResponse,
+  normalizeExportMetricsRequest,
   normalizeExportTraceRequest,
 } from "./otlp.js";
 import { FileStore } from "./store.js";
@@ -38,6 +42,11 @@ export function createServer(options = {}) {
         return sendJson(res, 200, { data: await store.listSpans(Number.isFinite(limit) ? limit : 50) });
       }
 
+      if (req.method === "GET" && url.pathname === "/metrics") {
+        const limit = Number.parseInt(url.searchParams.get("limit") ?? "50", 10);
+        return sendJson(res, 200, { data: await store.listMetrics(Number.isFinite(limit) ? limit : 50) });
+      }
+
       if (req.method === "POST" && url.pathname === "/api/public/otel/v1/traces") {
         const auth = parseBasicAuth(req.headers.authorization);
         if (!isAuthorized(auth, expectedPublicKey, expectedSecretKey)) {
@@ -60,6 +69,30 @@ export function createServer(options = {}) {
         const saved = await store.saveBatch({ rawRequest, spans, ingest });
 
         return sendOtlpSuccess(res, req.headers["content-type"], saved);
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/public/otel/v1/metrics") {
+        const auth = parseBasicAuth(req.headers.authorization);
+        if (!isAuthorized(auth, expectedPublicKey, expectedSecretKey)) {
+          console.error("[gtrace] unauthorized OTLP metrics ingest request");
+          return sendJson(res, 401, { error: "unauthorized" });
+        }
+
+        const body = await readBody(req);
+        const decodedBody = await decodeBody(body, req.headers["content-encoding"]);
+        const rawRequest = decodeMetricRequest(decodedBody, req.headers["content-type"]);
+        const ingest = {
+          public_key: auth?.username,
+          sdk_name: req.headers["x-gtrace-sdk-name"],
+          sdk_version: req.headers["x-gtrace-sdk-version"],
+          content_type: req.headers["content-type"],
+          user_agent: req.headers["user-agent"],
+          received_at: new Date().toISOString(),
+        };
+        const metrics = normalizeExportMetricsRequest(rawRequest, ingest);
+        const saved = await store.saveBatch({ rawRequest, metrics, ingest });
+
+        return sendOtlpMetricSuccess(res, req.headers["content-type"], saved);
       }
 
       if (req.method === "POST" && url.pathname === "/api/gtrace/v1/codex-spans") {
@@ -98,7 +131,7 @@ export function createServer(options = {}) {
       return sendJson(res, 404, { error: "not_found" });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[gtrace] failed to ingest OTLP trace request:", message);
+      console.error("[gtrace] failed to ingest OTLP request:", message);
       return sendJson(res, 400, { error: "bad_request", message });
     }
   });
@@ -140,6 +173,13 @@ function decodeTraceRequest(body, contentType = "") {
   return decodeExportTraceRequest(body);
 }
 
+function decodeMetricRequest(body, contentType = "") {
+  if (String(contentType).includes("application/json")) {
+    return decodeJsonExportMetricsRequest(body);
+  }
+  return decodeExportMetricsRequest(body);
+}
+
 function sendOtlpSuccess(res, contentType = "", saved) {
   const headers = {
     "x-gtrace-batch-id": saved.id,
@@ -155,6 +195,21 @@ function sendOtlpSuccess(res, contentType = "", saved) {
   return res.end(encodeExportTraceResponse());
 }
 
+function sendOtlpMetricSuccess(res, contentType = "", saved) {
+  const headers = {
+    "x-gtrace-batch-id": saved.id,
+    "x-gtrace-metric-count": String(saved.metricCount),
+  };
+
+  if (String(contentType).includes("application/json")) {
+    res.writeHead(200, { ...headers, "content-type": "application/json; charset=utf-8" });
+    return res.end("{}\n");
+  }
+
+  res.writeHead(200, { ...headers, "content-type": "application/x-protobuf" });
+  return res.end(encodeExportMetricsResponse());
+}
+
 function sendJson(res, status, body) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(`${JSON.stringify(body)}\n`);
@@ -166,5 +221,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   server.listen(port, () => {
     console.log(`gtrace listening on http://localhost:${port}`);
     console.log("OTLP trace ingest: /api/public/otel/v1/traces");
+    console.log("OTLP metrics ingest: /api/public/otel/v1/metrics");
   });
 }

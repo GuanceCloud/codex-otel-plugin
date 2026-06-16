@@ -112,10 +112,133 @@ function codexSpansToOtlpRequest(spans = [], format = "json") {
   };
 }
 
+const DURATION_BOUNDS = [1, 5, 10, 50, 100, 500, 1000, 5000, 30000, 120000];
+const TOKEN_BOUNDS = [1, 10, 100, 1000, 10000, 100000, 1000000];
+
+function metricKey(metric) {
+  return JSON.stringify({
+    name: metric.name,
+    type: metric.type,
+    unit: metric.unit,
+    description: metric.description,
+  });
+}
+
+function metricBounds(metric) {
+  if (metric.unit === "{token}") return TOKEN_BOUNDS;
+  if (metric.unit === "ms") return DURATION_BOUNDS;
+  return [];
+}
+
+function histogramDataPoint(metric, format) {
+  const value = Number(metric.value);
+  const bounds = metricBounds(metric);
+  const bucketCounts = Array.from({ length: bounds.length + 1 }, () => "0");
+  let bucketIndex = bounds.findIndex((bound) => value <= bound);
+  if (bucketIndex < 0) bucketIndex = bounds.length;
+  bucketCounts[bucketIndex] = "1";
+  return {
+    attributes: attributesToOtlp(metric.attributes, format),
+    startTimeUnixNano: metric.start_time_unix_nano,
+    timeUnixNano: metric.time_unix_nano,
+    count: "1",
+    sum: value,
+    bucketCounts,
+    explicitBounds: bounds,
+    min: value,
+    max: value,
+  };
+}
+
+function numberDataPoint(metric, format) {
+  const value = Number(metric.value);
+  return {
+    attributes: attributesToOtlp(metric.attributes, format),
+    startTimeUnixNano: metric.start_time_unix_nano,
+    timeUnixNano: metric.time_unix_nano,
+    asInt: Number.isInteger(value) ? String(value) : undefined,
+    asDouble: Number.isInteger(value) ? undefined : value,
+  };
+}
+
+function codexMetricToOtlp(metric, format) {
+  const out = {
+    name: metric.name,
+    description: metric.description,
+    unit: metric.unit,
+  };
+  if (metric.type === "sum") {
+    out.sum = {
+      dataPoints: [numberDataPoint(metric, format)],
+      aggregationTemporality: "AGGREGATION_TEMPORALITY_DELTA",
+      isMonotonic: true,
+    };
+  } else if (metric.type === "histogram") {
+    out.histogram = {
+      dataPoints: [histogramDataPoint(metric, format)],
+      aggregationTemporality: "AGGREGATION_TEMPORALITY_DELTA",
+    };
+  }
+  return out;
+}
+
+function codexMetricsToOtlpRequest(metrics = [], format = "json") {
+  const resourceGroups = new Map();
+  for (const metric of metrics) {
+    const resourceGroupKey = JSON.stringify({
+      resource: metric.resource ?? {},
+      scope: metric.scope ?? {},
+    });
+    if (!resourceGroups.has(resourceGroupKey)) {
+      resourceGroups.set(resourceGroupKey, {
+        resource: metric.resource ?? {},
+        scope: metric.scope ?? {},
+        metricGroups: new Map(),
+      });
+    }
+    const resourceGroup = resourceGroups.get(resourceGroupKey);
+    const key = metricKey(metric);
+    if (!resourceGroup.metricGroups.has(key)) {
+      resourceGroup.metricGroups.set(key, codexMetricToOtlp(metric, format));
+    } else {
+      const existing = resourceGroup.metricGroups.get(key);
+      const next = codexMetricToOtlp(metric, format);
+      if (existing.sum && next.sum) existing.sum.dataPoints.push(...next.sum.dataPoints);
+      if (existing.histogram && next.histogram) {
+        existing.histogram.dataPoints.push(...next.histogram.dataPoints);
+      }
+    }
+  }
+
+  return {
+    resourceMetrics: Array.from(resourceGroups.values()).map((group) => ({
+      resource: { attributes: attributesToOtlp(group.resource, format) },
+      scopeMetrics: [
+        {
+          scope: {
+            name: group.scope.name,
+            version: group.scope.version,
+            attributes: attributesToOtlp(group.scope.attributes, format),
+          },
+          metrics: Array.from(group.metricGroups.values()),
+        },
+      ],
+    })),
+  };
+}
+
 export function codexSpansToOtlpJson(spans = []) {
   return codexSpansToOtlpRequest(spans, "json");
 }
 
 export function codexSpansToOtlpProtobufRequest(spans = []) {
   return codexSpansToOtlpRequest(spans, "protobuf");
+}
+
+export function codexMetricsToOtlpJson(metrics = []) {
+  return codexMetricsToOtlpRequest(metrics, "json");
+}
+
+export function codexMetricsToOtlpProtobufRequest(metrics = []) {
+  return codexMetricsToOtlpRequest(metrics, "protobuf");
 }

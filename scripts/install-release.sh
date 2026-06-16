@@ -59,6 +59,7 @@ Install options are passed to scripts/install.sh:
   --endpoint URL
   --x-token TOKEN
   --trace-path PATH
+  --metrics-path PATH
   --header KEY=VALUE
   --tag KEY=VALUE
   --config-file PATH

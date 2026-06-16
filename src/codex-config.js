@@ -82,6 +82,7 @@ export function resolveConfig(options = {}) {
     enabled: false,
     endpoint: undefined,
     tracePath: "api/public/otel/v1/traces",
+    metricsPath: "api/public/otel/v1/metrics",
     max_chars: 20_000,
     debug: false,
     fail_on_error: false,
@@ -105,8 +106,14 @@ export function resolveConfig(options = {}) {
       env.GTRACE_TRACE_PATH ?? env.GTRACE_CODEX_TRACE_PATH ?? merged.tracePath,
       "api/public/otel/v1/traces",
     ),
+    metricsPath: normalizeSignalPath(
+      env.GTRACE_METRICS_PATH ?? env.GTRACE_CODEX_METRICS_PATH ?? merged.metricsPath,
+      "api/public/otel/v1/metrics",
+    ),
     otel_traces_url:
       env.GTRACE_OTEL_TRACES_URL ?? env.GTRACE_CODEX_OTEL_TRACES_URL ?? merged.otel_traces_url,
+    otel_metrics_url:
+      env.GTRACE_OTEL_METRICS_URL ?? env.GTRACE_CODEX_OTEL_METRICS_URL ?? merged.otel_metrics_url,
     protocol: "http/protobuf",
     headers: parseHeaders(merged.headers),
     environment: env.GTRACE_ENVIRONMENT ?? env.GTRACE_CODEX_ENVIRONMENT ?? merged.environment,

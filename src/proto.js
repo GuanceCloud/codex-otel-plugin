@@ -18,6 +18,12 @@ const STATUS_CODE_NAMES = {
   2: "STATUS_CODE_ERROR",
 };
 
+const AGGREGATION_TEMPORALITY_NAMES = {
+  0: "AGGREGATION_TEMPORALITY_UNSPECIFIED",
+  1: "AGGREGATION_TEMPORALITY_DELTA",
+  2: "AGGREGATION_TEMPORALITY_CUMULATIVE",
+};
+
 export function decodeExportTraceServiceRequest(buffer) {
   return decodeExportTraceRequest(toBuffer(buffer));
 }
@@ -38,6 +44,26 @@ export function encodeExportTraceServiceResponse(response = {}) {
   });
 }
 
+export function decodeExportMetricsServiceRequest(buffer) {
+  return decodeExportMetricsRequest(toBuffer(buffer));
+}
+
+export function encodeExportMetricsServiceRequest(request) {
+  return encodeMessage((writer) => {
+    for (const resourceMetric of request.resourceMetrics ?? []) {
+      writer.message(1, encodeResourceMetrics(resourceMetric));
+    }
+  });
+}
+
+export function encodeExportMetricsServiceResponse(response = {}) {
+  return encodeMessage((writer) => {
+    if (response.partialSuccess || response.partial_success) {
+      writer.message(1, encodeMetricsPartialSuccess(response.partialSuccess ?? response.partial_success));
+    }
+  });
+}
+
 function decodeExportTraceRequest(buffer) {
   const out = { resourceSpans: [] };
   readFields(buffer, (field, wire, reader) => {
@@ -53,6 +79,123 @@ function decodeResourceSpans(buffer) {
     if (field === 1 && wire === WIRE_LENGTH_DELIMITED) out.resource = decodeResource(reader.bytes());
     else if (field === 2 && wire === WIRE_LENGTH_DELIMITED) out.scopeSpans.push(decodeScopeSpans(reader.bytes()));
     else if (field === 3 && wire === WIRE_LENGTH_DELIMITED) out.schemaUrl = reader.string();
+    else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeExportMetricsRequest(buffer) {
+  const out = { resourceMetrics: [] };
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 1 && wire === WIRE_LENGTH_DELIMITED) out.resourceMetrics.push(decodeResourceMetrics(reader.bytes()));
+    else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeResourceMetrics(buffer) {
+  const out = { scopeMetrics: [] };
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 1 && wire === WIRE_LENGTH_DELIMITED) out.resource = decodeResource(reader.bytes());
+    else if (field === 2 && wire === WIRE_LENGTH_DELIMITED) out.scopeMetrics.push(decodeScopeMetrics(reader.bytes()));
+    else if (field === 3 && wire === WIRE_LENGTH_DELIMITED) out.schemaUrl = reader.string();
+    else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeScopeMetrics(buffer) {
+  const out = { metrics: [] };
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 1 && wire === WIRE_LENGTH_DELIMITED) out.scope = decodeInstrumentationScope(reader.bytes());
+    else if (field === 2 && wire === WIRE_LENGTH_DELIMITED) out.metrics.push(decodeMetric(reader.bytes()));
+    else if (field === 3 && wire === WIRE_LENGTH_DELIMITED) out.schemaUrl = reader.string();
+    else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeMetric(buffer) {
+  const out = {};
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 1 && wire === WIRE_LENGTH_DELIMITED) out.name = reader.string();
+    else if (field === 2 && wire === WIRE_LENGTH_DELIMITED) out.description = reader.string();
+    else if (field === 3 && wire === WIRE_LENGTH_DELIMITED) out.unit = reader.string();
+    else if (field === 5 && wire === WIRE_LENGTH_DELIMITED) out.gauge = decodeGauge(reader.bytes());
+    else if (field === 7 && wire === WIRE_LENGTH_DELIMITED) out.sum = decodeSum(reader.bytes());
+    else if (field === 9 && wire === WIRE_LENGTH_DELIMITED) out.histogram = decodeHistogram(reader.bytes());
+    else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeGauge(buffer) {
+  const out = { dataPoints: [] };
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 1 && wire === WIRE_LENGTH_DELIMITED) out.dataPoints.push(decodeNumberDataPoint(reader.bytes()));
+    else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeSum(buffer) {
+  const out = { dataPoints: [] };
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 1 && wire === WIRE_LENGTH_DELIMITED) out.dataPoints.push(decodeNumberDataPoint(reader.bytes()));
+    else if (field === 2 && wire === WIRE_VARINT) {
+      out.aggregationTemporality =
+        AGGREGATION_TEMPORALITY_NAMES[reader.uint32()] ?? "AGGREGATION_TEMPORALITY_UNSPECIFIED";
+    } else if (field === 3 && wire === WIRE_VARINT) out.isMonotonic = reader.bool();
+    else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeHistogram(buffer) {
+  const out = { dataPoints: [] };
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 1 && wire === WIRE_LENGTH_DELIMITED) out.dataPoints.push(decodeHistogramDataPoint(reader.bytes()));
+    else if (field === 2 && wire === WIRE_VARINT) {
+      out.aggregationTemporality =
+        AGGREGATION_TEMPORALITY_NAMES[reader.uint32()] ?? "AGGREGATION_TEMPORALITY_UNSPECIFIED";
+    } else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeNumberDataPoint(buffer) {
+  const out = { attributes: [] };
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 2 && wire === WIRE_FIXED64) out.startTimeUnixNano = reader.fixed64().toString();
+    else if (field === 3 && wire === WIRE_FIXED64) out.timeUnixNano = reader.fixed64().toString();
+    else if (field === 4 && wire === WIRE_FIXED64) out.asDouble = reader.double();
+    else if (field === 6 && wire === WIRE_VARINT) out.asInt = reader.int64().toString();
+    else if (field === 7 && wire === WIRE_LENGTH_DELIMITED) out.attributes.push(decodeKeyValue(reader.bytes()));
+    else if (field === 8 && wire === WIRE_VARINT) out.flags = reader.uint32();
+    else reader.skip(wire);
+  });
+  return out;
+}
+
+function decodeHistogramDataPoint(buffer) {
+  const out = { attributes: [], bucketCounts: [], explicitBounds: [] };
+  readFields(buffer, (field, wire, reader) => {
+    if (field === 2 && wire === WIRE_FIXED64) out.startTimeUnixNano = reader.fixed64().toString();
+    else if (field === 3 && wire === WIRE_FIXED64) out.timeUnixNano = reader.fixed64().toString();
+    else if (field === 4 && wire === WIRE_FIXED64) out.count = reader.fixed64().toString();
+    else if (field === 5 && wire === WIRE_FIXED64) out.sum = reader.double();
+    else if (field === 6 && wire === WIRE_FIXED64) out.bucketCounts.push(reader.fixed64().toString());
+    else if (field === 6 && wire === WIRE_LENGTH_DELIMITED) {
+      const packed = new ProtoReader(reader.bytes());
+      while (!packed.done()) out.bucketCounts.push(packed.fixed64().toString());
+    } else if (field === 7 && wire === WIRE_FIXED64) out.explicitBounds.push(reader.double());
+    else if (field === 7 && wire === WIRE_LENGTH_DELIMITED) {
+      const packed = new ProtoReader(reader.bytes());
+      while (!packed.done()) out.explicitBounds.push(packed.double());
+    } else if (field === 9 && wire === WIRE_LENGTH_DELIMITED) out.attributes.push(decodeKeyValue(reader.bytes()));
+    else if (field === 10 && wire === WIRE_VARINT) out.flags = reader.uint32();
+    else if (field === 11 && wire === WIRE_FIXED64) out.min = reader.double();
+    else if (field === 12 && wire === WIRE_FIXED64) out.max = reader.double();
     else reader.skip(wire);
   });
   return out;
@@ -217,6 +360,80 @@ function encodeScopeSpans(value) {
   });
 }
 
+function encodeResourceMetrics(value) {
+  return encodeMessage((writer) => {
+    if (value.resource) writer.message(1, encodeResource(value.resource));
+    for (const item of value.scopeMetrics ?? []) writer.message(2, encodeScopeMetrics(item));
+    writer.string(3, value.schemaUrl);
+  });
+}
+
+function encodeScopeMetrics(value) {
+  return encodeMessage((writer) => {
+    if (value.scope) writer.message(1, encodeInstrumentationScope(value.scope));
+    for (const item of value.metrics ?? []) writer.message(2, encodeMetric(item));
+    writer.string(3, value.schemaUrl);
+  });
+}
+
+function encodeMetric(value) {
+  return encodeMessage((writer) => {
+    writer.string(1, value.name);
+    writer.string(2, value.description);
+    writer.string(3, value.unit);
+    if (value.gauge) writer.message(5, encodeGauge(value.gauge));
+    if (value.sum) writer.message(7, encodeSum(value.sum));
+    if (value.histogram) writer.message(9, encodeHistogram(value.histogram));
+  });
+}
+
+function encodeGauge(value) {
+  return encodeMessage((writer) => {
+    for (const item of value.dataPoints ?? []) writer.message(1, encodeNumberDataPoint(item));
+  });
+}
+
+function encodeSum(value) {
+  return encodeMessage((writer) => {
+    for (const item of value.dataPoints ?? []) writer.message(1, encodeNumberDataPoint(item));
+    writer.uint32(2, enumNumber(value.aggregationTemporality, AGGREGATION_TEMPORALITY_NAMES));
+    writer.bool(3, value.isMonotonic);
+  });
+}
+
+function encodeHistogram(value) {
+  return encodeMessage((writer) => {
+    for (const item of value.dataPoints ?? []) writer.message(1, encodeHistogramDataPoint(item));
+    writer.uint32(2, enumNumber(value.aggregationTemporality, AGGREGATION_TEMPORALITY_NAMES));
+  });
+}
+
+function encodeNumberDataPoint(value) {
+  return encodeMessage((writer) => {
+    writer.fixed64(2, value.startTimeUnixNano);
+    writer.fixed64(3, value.timeUnixNano);
+    writer.double(4, value.asDouble);
+    writer.int64(6, value.asInt);
+    for (const item of value.attributes ?? []) writer.message(7, encodeKeyValue(item));
+    writer.uint32(8, value.flags);
+  });
+}
+
+function encodeHistogramDataPoint(value) {
+  return encodeMessage((writer) => {
+    writer.fixed64(2, value.startTimeUnixNano);
+    writer.fixed64(3, value.timeUnixNano);
+    writer.fixed64(4, value.count);
+    writer.double(5, value.sum);
+    for (const item of value.bucketCounts ?? []) writer.fixed64(6, item);
+    for (const item of value.explicitBounds ?? []) writer.double(7, item);
+    for (const item of value.attributes ?? []) writer.message(9, encodeKeyValue(item));
+    writer.uint32(10, value.flags);
+    writer.double(11, value.min);
+    writer.double(12, value.max);
+  });
+}
+
 function encodeInstrumentationScope(value) {
   return encodeMessage((writer) => {
     writer.string(1, value.name);
@@ -308,6 +525,13 @@ function encodeKeyValueList(value) {
 function encodePartialSuccess(value) {
   return encodeMessage((writer) => {
     writer.int64(1, value.rejectedSpans ?? value.rejected_spans);
+    writer.string(2, value.errorMessage ?? value.error_message);
+  });
+}
+
+function encodeMetricsPartialSuccess(value) {
+  return encodeMessage((writer) => {
+    writer.int64(1, value.rejectedDataPoints ?? value.rejected_data_points);
     writer.string(2, value.errorMessage ?? value.error_message);
   });
 }

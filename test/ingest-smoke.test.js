@@ -134,6 +134,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
         secret_key: "sk-test",
         endpoint: baseUrl,
         tracePath: "api/public/otel/v1/traces",
+        metricsPath: "api/public/otel/v1/metrics",
         headers: {
           "x-gtrace-sdk-name": "gtrace-codex",
         },
@@ -160,8 +161,9 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(result.status, 0, result.stderr);
   assert.match(await readFile(`${rollout}.gtrace`, "utf-8"), /turn-1/);
   assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /uploaded spans/);
+  assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /uploaded metrics/);
 
-  const batch = await latestBatch();
+  const batch = await latestTraceBatch();
   const uploadedSpans = batch.raw_request.resourceSpans[0].scopeSpans[0].spans;
   assert.ok(batch.raw_request.resourceSpans, "hook should upload OTLP resourceSpans");
   assert.equal(batch.raw_request.type, undefined);
@@ -240,6 +242,45 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     listed.data.find((span) => span.gtrace.observation.type === "llm").gtrace.observation.model_name,
     "gpt-5.4",
   );
+
+  const metricsBatch = await latestMetricsBatch();
+  assert.ok(metricsBatch.raw_request.resourceMetrics, "hook should upload OTLP resourceMetrics");
+  assert.match(metricsBatch.ingest.content_type, /application\/x-protobuf/);
+  assert.equal(metricsBatch.ingest.sdk_name, "gtrace-codex");
+  assert.equal(metricsBatch.metric_count, 17);
+  assert.deepEqual(
+    Array.from(new Set(metricsBatch.metrics.map((metric) => metric.name))).sort(),
+    [
+      "gen_ai.agent.operation.count",
+      "gen_ai.agent.operation.duration",
+      "gen_ai.agent.request.count",
+      "gen_ai.agent.request.duration",
+      "gen_ai.agent.token.usage",
+    ],
+  );
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_id === "sess-basic"));
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_key === "sess-basic"));
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.run_id === undefined));
+  assert.deepEqual(
+    Array.from(
+      new Set(
+        metricsBatch.metrics
+          .filter((metric) => metric.name === "gen_ai.agent.token.usage")
+          .map((metric) => metric.attributes.token_type),
+      ),
+    ).sort(),
+    ["cache_read", "cache_total", "input", "output", "reasoning", "total"],
+  );
+  const toolOperation = metricsBatch.metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.count" &&
+      metric.attributes.operation_name === "tool",
+  );
+  assert.equal(toolOperation.attributes.tool_name, "exec_command");
+  assert.equal(toolOperation.attributes.tool_result_status, "completed");
+
+  const listedMetrics = await fetch(`${baseUrl}/metrics?limit=20`).then((res) => res.json());
+  assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.agent.token.usage"));
 });
 
 test("Codex parser infers completed status when Stop hook runs before task_complete is written", () => {
@@ -487,10 +528,22 @@ test("Codex collector skips blank turns that only contain startup context", asyn
   assert.deepEqual(result.completedTurnIds, []);
 });
 
-async function latestBatch() {
+async function latestTraceBatch() {
+  return latestBatch((batch) => batch.span_count > 0);
+}
+
+async function latestMetricsBatch() {
+  return latestBatch((batch) => batch.metric_count > 0);
+}
+
+async function latestBatch(predicate = () => true) {
   const batchDir = path.join(dataDir, "batches");
   const files = (await readdir(batchDir)).filter((file) => file.endsWith(".json")).sort();
-  return JSON.parse(await readFile(path.join(batchDir, files.at(-1)), "utf-8"));
+  for (const file of files.reverse()) {
+    const batch = JSON.parse(await readFile(path.join(batchDir, file), "utf-8"));
+    if (predicate(batch)) return batch;
+  }
+  throw new Error("no matching batch found");
 }
 
 function attrValue(attributes, key) {

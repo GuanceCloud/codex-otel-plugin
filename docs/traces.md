@@ -1,6 +1,6 @@
 # Trace 字段说明
 
-本文档说明 codex-otel-plugin 上报到 OTLP Trace 的 span 结构、字段命名、token 口径和 UI 展示建议。
+本文档说明 codex-otel-plugin 上报到 OTLP Trace 的 span 结构、字段命名、token 口径和 UI 展示建议。Metrics 指标体系见 [metrics.md](metrics.md)。
 
 ## Trace 结构
 
@@ -182,7 +182,7 @@ usage_cache_total_tokens = usage_cache_read_input_tokens
 
 `assistant` span 不携带 `usage_*` 字段，避免 UI 或后端把同一次模型调用的 token 重复计算。
 
-### 推理 Token
+## 推理 Token
 
 `usage_reasoning_tokens` 来自 Codex rollout 中的：
 

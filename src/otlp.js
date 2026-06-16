@@ -1,5 +1,7 @@
 import {
+  decodeExportMetricsServiceRequest,
   decodeExportTraceServiceRequest,
+  encodeExportMetricsServiceResponse,
   encodeExportTraceServiceResponse,
 } from "./proto.js";
 
@@ -7,12 +9,24 @@ export function decodeExportTraceRequest(buffer) {
   return decodeExportTraceServiceRequest(buffer);
 }
 
+export function decodeExportMetricsRequest(buffer) {
+  return decodeExportMetricsServiceRequest(buffer);
+}
+
 export function decodeJsonExportTraceRequest(buffer) {
+  return JSON.parse(Buffer.from(buffer).toString("utf-8"));
+}
+
+export function decodeJsonExportMetricsRequest(buffer) {
   return JSON.parse(Buffer.from(buffer).toString("utf-8"));
 }
 
 export function encodeExportTraceResponse(response = {}) {
   return encodeExportTraceServiceResponse(response);
+}
+
+export function encodeExportMetricsResponse(response = {}) {
+  return encodeExportMetricsServiceResponse(response);
 }
 
 export function normalizeExportTraceRequest(request, ingest = {}) {
@@ -30,6 +44,28 @@ export function normalizeExportTraceRequest(request, ingest = {}) {
 
       for (const span of scopeSpan.spans ?? []) {
         records.push(normalizeSpan(span, resourceAttributes, scope, ingest));
+      }
+    }
+  }
+
+  return records;
+}
+
+export function normalizeExportMetricsRequest(request, ingest = {}) {
+  const records = [];
+
+  for (const resourceMetric of request.resourceMetrics ?? []) {
+    const resourceAttributes = attributesToObject(resourceMetric.resource?.attributes);
+
+    for (const scopeMetric of resourceMetric.scopeMetrics ?? []) {
+      const scope = {
+        name: scopeMetric.scope?.name,
+        version: scopeMetric.scope?.version,
+        attributes: attributesToObject(scopeMetric.scope?.attributes),
+      };
+
+      for (const metric of scopeMetric.metrics ?? []) {
+        records.push(...normalizeMetric(metric, resourceAttributes, scope, ingest));
       }
     }
   }
@@ -62,6 +98,73 @@ export function normalizeSpan(span, resourceAttributes, scope, ingest) {
     gtrace,
     ingest,
   };
+}
+
+function normalizeMetric(metric, resourceAttributes, scope, ingest) {
+  if (metric.sum) {
+    return (metric.sum.dataPoints ?? []).map((point) => ({
+      name: metric.name,
+      description: metric.description,
+      unit: metric.unit,
+      type: "sum",
+      value: numberPointValue(point),
+      aggregation_temporality: metric.sum.aggregationTemporality,
+      is_monotonic: metric.sum.isMonotonic,
+      start_time_unix_nano: stringifyOptional(point.startTimeUnixNano),
+      time_unix_nano: stringifyOptional(point.timeUnixNano),
+      attributes: attributesToObject(point.attributes),
+      resource: resourceAttributes,
+      scope,
+      ingest,
+    }));
+  }
+  if (metric.histogram) {
+    return (metric.histogram.dataPoints ?? []).map((point) => ({
+      name: metric.name,
+      description: metric.description,
+      unit: metric.unit,
+      type: "histogram",
+      aggregation_temporality: metric.histogram.aggregationTemporality,
+      count: parseInteger(point.count ?? "0"),
+      sum: point.sum,
+      min: point.min,
+      max: point.max,
+      bucket_counts: (point.bucketCounts ?? []).map(parseInteger),
+      explicit_bounds: point.explicitBounds ?? [],
+      start_time_unix_nano: stringifyOptional(point.startTimeUnixNano),
+      time_unix_nano: stringifyOptional(point.timeUnixNano),
+      attributes: attributesToObject(point.attributes),
+      resource: resourceAttributes,
+      scope,
+      ingest,
+    }));
+  }
+  if (metric.gauge) {
+    return (metric.gauge.dataPoints ?? []).map((point) => ({
+      name: metric.name,
+      description: metric.description,
+      unit: metric.unit,
+      type: "gauge",
+      value: numberPointValue(point),
+      start_time_unix_nano: stringifyOptional(point.startTimeUnixNano),
+      time_unix_nano: stringifyOptional(point.timeUnixNano),
+      attributes: attributesToObject(point.attributes),
+      resource: resourceAttributes,
+      scope,
+      ingest,
+    }));
+  }
+  return [];
+}
+
+function numberPointValue(point) {
+  if (point.asInt !== undefined) return parseInteger(point.asInt);
+  if (point.asDouble !== undefined) return point.asDouble;
+  return undefined;
+}
+
+function stringifyOptional(value) {
+  return value === undefined || value === null ? undefined : String(value);
 }
 
 export function attributesToObject(attributes = []) {

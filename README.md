@@ -1,6 +1,6 @@
 # codex-otel-plugin
 
-`codex-otel-plugin` 是一个 Codex 可观测采集插件。它通过 Codex Stop hook 读取 rollout transcript，将一次 Codex turn 转换为 OpenTelemetry OTLP Trace，并通过 HTTP/protobuf 上报。
+`codex-otel-plugin` 是一个 Codex 可观测采集插件。它通过 Codex Stop hook 读取 rollout transcript，将一次 Codex turn 转换为 OpenTelemetry OTLP Trace 与 Metrics，并通过 HTTP/protobuf 上报。
 
 当前实现只使用 Node.js 内置模块，没有运行时 npm 第三方依赖。
 
@@ -8,8 +8,9 @@
 
 - 采集 Codex turn、模型调用、工具调用和 token usage。
 - 生成 `agent_run`、`llm`、`assistant`、`tool:<name>` 四类 span。
-- 使用 OTLP Trace HTTP/protobuf 上报。
-- 支持 Dataway/GTrace 风格的 `endpoint + tracePath + headers` 配置。
+- 使用 OTLP Trace 与 Metrics HTTP/protobuf 上报。
+- Metrics 从同批 trace spans 派生，触发时机与 traces 相同，不做定时上报。
+- 支持 Dataway/GTrace 风格的 `endpoint + tracePath + metricsPath + headers` 配置。
 - 提供本地 ingest/debug server，便于接收和检查 OTLP JSON/protobuf 数据。
 
 Trace 字段、Span name、token 口径和 UI 展示建议见 [docs/traces.md](docs/traces.md)。
@@ -33,6 +34,7 @@ src/codex-otlp.js / src/proto.js 编码 OTLP protobuf
     |
     v
 POST <endpoint>/<tracePath>
+POST <endpoint>/<metricsPath>
 ```
 
 安装脚本会写入的 Hook 命令：
@@ -94,6 +96,7 @@ enabled = true
   "enabled": true,
   "endpoint": "https://llm-openway.guance.com",
   "tracePath": "v1/write/otel-llm",
+  "metricsPath": "v1/write/otel-metrics",
   "headers": {
     "X-Token": "<token>",
     "To-Headless": "true"
@@ -125,7 +128,7 @@ cat ~/.codex/gtrace.json
 - `codex plugin list` 中存在 `tracing@codex-otel-plugin`，状态为 `installed, enabled`
 - `codex plugin marketplace list` 中存在 `codex-otel-plugin`，root 为 `~/.codex/plugin-sources/codex-otel-plugin`
 - cache 目录中存在版本目录，例如 `~/.codex/plugins/cache/codex-otel-plugin/tracing/0.1.0`
-- `~/.codex/gtrace.json` 中包含 `endpoint`、`tracePath`、`headers.X-Token`
+- `~/.codex/gtrace.json` 中包含 `endpoint`、`tracePath`、`metricsPath`、`headers.X-Token`
 
 ## 升级
 
@@ -179,6 +182,7 @@ codex plugin remove tracing@codex-otel-plugin
 | `--endpoint URL` | 接收端基础地址，例如 `https://llm-openway.guance.com` |
 | `--x-token TOKEN` | 写入 `headers.X-Token` |
 | `--trace-path PATH` | Trace 写入路径，GTrace 默认 `v1/write/otel-llm` |
+| `--metrics-path PATH` | Metrics 写入路径，GTrace 默认 `v1/write/otel-metrics` |
 | `--type gtrace|otlp` | 配置预设，默认 `gtrace` |
 | `--header KEY=VALUE` | 追加 HTTP header，可重复 |
 | `--tag KEY=VALUE` | 追加 metadata/tag，可重复 |
@@ -230,16 +234,18 @@ Hook 会读取以下配置：
   "enabled": true,
   "endpoint": "http://localhost:3030",
   "tracePath": "api/public/otel/v1/traces",
+  "metricsPath": "api/public/otel/v1/metrics",
   "debug": true
 }
 ```
 
-如果 `endpoint` 已经是完整 OTLP traces 地址，可以直接配置 `otel_traces_url`：
+如果 `endpoint` 已经是完整 OTLP traces / metrics 地址，可以直接配置 `otel_traces_url` 和 `otel_metrics_url`：
 
 ```json
 {
   "enabled": true,
   "otel_traces_url": "http://localhost:4318/v1/traces",
+  "otel_metrics_url": "http://localhost:4318/v1/metrics",
   "debug": true
 }
 ```
@@ -251,6 +257,7 @@ Hook 会读取以下配置：
   "enabled": true,
   "endpoint": "http://localhost:3030",
   "tracePath": "api/public/otel/v1/traces",
+  "metricsPath": "api/public/otel/v1/metrics",
   "public_key": "pk-test",
   "secret_key": "sk-test"
 }
@@ -266,7 +273,9 @@ Hook 会读取以下配置：
 export GTRACE_CODEX_ENABLED=true
 export GTRACE_ENDPOINT="http://localhost:4318"
 export GTRACE_TRACE_PATH="v1/traces"
+export GTRACE_METRICS_PATH="v1/metrics"
 export GTRACE_OTEL_TRACES_URL="http://localhost:4318/v1/traces"
+export GTRACE_OTEL_METRICS_URL="http://localhost:4318/v1/metrics"
 export GTRACE_CODEX_DEBUG=true
 ```
 
@@ -299,14 +308,17 @@ npm start
 | `GET` | `/health` | 本地服务健康检查 |
 | `GET` | `/api/public/health` | OTLP ingest 健康检查 |
 | `POST` | `/api/public/otel/v1/traces` | 接收 OTLP Trace JSON/protobuf |
+| `POST` | `/api/public/otel/v1/metrics` | 接收 OTLP Metrics JSON/protobuf |
 | `POST` | `/api/gtrace/v1/codex-spans` | 接收原生 JSON 调试 span |
 | `GET` | `/traces?limit=50` | 查看最近规范化 span |
+| `GET` | `/metrics?limit=50` | 查看最近规范化 metric data point |
 
 本地落盘目录：
 
 ```text
 data/batches/*.json
 data/spans.ndjson
+data/metrics.ndjson
 ```
 
 `data/` 只用于调试，不是字段规范来源。
@@ -342,6 +354,20 @@ agent_run
 
 详细字段说明见 [docs/traces.md](docs/traces.md)。
 
+## Metrics 数据模型
+
+Metrics 与 traces 在同一次 Stop hook 中上报，第一版只从当前 turn 的 spans 派生核心指标。完整指标设计、tag、token 映射和 OTLP 形态见 [docs/metrics.md](docs/metrics.md)。
+
+| 指标名 | 类型 | 单位 | 来源 |
+| --- | --- | --- | --- |
+| `gen_ai.agent.request.count` | Counter | `1` | 每个 `agent_run` span 加 1 |
+| `gen_ai.agent.request.duration` | Histogram | `ms` | `agent_run` span duration |
+| `gen_ai.agent.operation.count` | Counter | `1` | 每个 `llm` 和 `tool:*` span 加 1 |
+| `gen_ai.agent.operation.duration` | Histogram | `ms` | `llm` 和 `tool:*` span duration |
+| `gen_ai.agent.token.usage` | Histogram | `{token}` | 每个 `llm` span 的 `usage_*` 字段 |
+
+Metrics 默认带 `session_id` / `session_key`，不带 `run_id`。
+
 ## 验证
 
 修改代码或字段口径后至少运行：
@@ -354,11 +380,11 @@ npm ls --all
 期望结果：
 
 ```text
-5 tests passed
+9 tests passed
 ```
 
 ```text
-gtrace@0.1.0 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.1 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 
@@ -366,7 +392,7 @@ gtrace@0.1.0 /home/liurui/code/codex-otel-plugin
 
 - OTLP JSON ingest。
 - OTLP protobuf ingest。
-- Codex hook 解析 rollout 并上报 OTLP protobuf。
+- Codex hook 解析 rollout 并上报 OTLP Trace/Metrics protobuf。
 - Stop hook 早于 `task_complete` 写入时的 completed 状态推断。
 - 空白启动 turn 过滤，不生成 OTLP span。
 
@@ -382,7 +408,9 @@ tail -n 100 ~/.codex/gtrace-hook.log
 
 ```bash
 curl "http://localhost:3030/traces?limit=20"
+curl "http://localhost:3030/metrics?limit=20"
 tail -n 20 data/spans.ndjson
+tail -n 20 data/metrics.ndjson
 ls -lt data/batches | head
 ```
 
@@ -395,7 +423,7 @@ find ~/.codex/sessions -name "*.gtrace" -type f
 如果 Stop hook 报错，优先检查：
 
 - `~/.codex/gtrace.json` 是否启用。
-- `endpoint`、`tracePath` 或 `otel_traces_url` 是否指向正确 OTLP Trace 接口。
+- `endpoint`、`tracePath`、`metricsPath`、`otel_traces_url` 或 `otel_metrics_url` 是否指向正确 OTLP 接口。
 - 认证 header 是否正确。
 - `~/.codex/gtrace-hook.log` 中的 HTTP 状态码和错误信息。
 

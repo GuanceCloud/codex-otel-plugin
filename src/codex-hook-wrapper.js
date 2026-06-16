@@ -2,10 +2,11 @@ import * as fs from "node:fs/promises";
 
 import { collectRollout } from "./codex-collector.js";
 import { resolveConfig } from "./codex-config.js";
-import { codexSpansToOtlpProtobufRequest } from "./codex-otlp.js";
+import { buildCodexMetrics } from "./codex-metrics.js";
+import { codexMetricsToOtlpProtobufRequest, codexSpansToOtlpProtobufRequest } from "./codex-otlp.js";
 import { markTurnUploaded } from "./codex-sidecar.js";
 import { readStdin } from "./codex-utils.js";
-import { encodeExportTraceServiceRequest } from "./proto.js";
+import { encodeExportMetricsServiceRequest, encodeExportTraceServiceRequest } from "./proto.js";
 
 function resolveOtelUrl(endpoint, path) {
   const normalizedPath = String(path ?? "").trim().replace(/^\/+/, "").replace(/\/+$/, "");
@@ -16,9 +17,13 @@ function resolveOtelUrl(endpoint, path) {
   return `${endpoint}/${normalizedPath}`;
 }
 
-function endpoint(config) {
-  if (config.otel_traces_url) return config.otel_traces_url;
-  return resolveOtelUrl(config.endpoint ?? config.base_url, config.tracePath);
+function endpoint(config, signal) {
+  if (signal === "metrics" && config.otel_metrics_url) return config.otel_metrics_url;
+  if (signal === "traces" && config.otel_traces_url) return config.otel_traces_url;
+  return resolveOtelUrl(
+    config.endpoint ?? config.base_url,
+    signal === "metrics" ? config.metricsPath : config.tracePath,
+  );
 }
 
 function authHeader(config) {
@@ -39,34 +44,42 @@ async function appendLog(config, message, extra) {
   }
 }
 
-async function upload(config, payload) {
+async function upload(config, signal, body) {
   const headers = { ...(config.headers ?? {}), "content-type": "application/x-protobuf" };
   const auth = authHeader(config);
   if (auth && !headers.authorization && !headers.Authorization) headers.authorization = auth;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.timeout_ms ?? 10_000);
-  const url = endpoint(config);
+  const url = endpoint(config, signal);
   try {
     const response = await fetch(url, {
       method: "POST",
       headers,
-      body: encodeExportTraceServiceRequest(codexSpansToOtlpProtobufRequest(payload.spans)),
+      body,
       signal: controller.signal,
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new Error(`gtrace upload failed: HTTP ${response.status} ${body}`);
     }
-    const body = await response.text();
-    if (!body) return {};
+    const responseBody = await response.text();
+    if (!responseBody) return {};
     try {
-      return JSON.parse(body);
+      return JSON.parse(responseBody);
     } catch {
-      return { response: body };
+      return { response: responseBody };
     }
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function uploadTraces(config, spans) {
+  return upload(config, "traces", encodeExportTraceServiceRequest(codexSpansToOtlpProtobufRequest(spans)));
+}
+
+async function uploadMetrics(config, metrics) {
+  return upload(config, "metrics", encodeExportMetricsServiceRequest(codexMetricsToOtlpProtobufRequest(metrics)));
 }
 
 export async function runHook(options = {}) {
@@ -89,20 +102,17 @@ export async function runHook(options = {}) {
   });
   if (result.spans.length === 0) return;
 
-  const response = await upload(config, {
-    rollout_file: hookInput.transcript_path,
-    session: {
-      session_id: result.sessionMeta.sessionId,
-      cli_version: result.sessionMeta.cliVersion,
-      model_provider: result.sessionMeta.modelProvider,
-    },
-    turn_count: result.turns.length,
-    spans: result.spans,
-  });
+  const response = await uploadTraces(config, result.spans);
   for (const turnId of result.completedTurnIds ?? []) {
     await markTurnUploaded(hookInput.transcript_path, turnId);
   }
   await appendLog(config, "uploaded spans", response);
+
+  const metrics = buildCodexMetrics(result.spans);
+  if (metrics.length > 0) {
+    const metricsResponse = await uploadMetrics(config, metrics);
+    await appendLog(config, "uploaded metrics", { ...metricsResponse, metrics: metrics.length });
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

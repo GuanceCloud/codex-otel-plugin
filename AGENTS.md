@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-`codex-otel-plugin` 是 Codex 可观测数据采集插件，核心能力是读取 Codex rollout transcript，并以 OTLP Trace HTTP/protobuf 上报。
+`codex-otel-plugin` 是 Codex 可观测数据采集插件，核心能力是读取 Codex rollout transcript，并以 OTLP Trace / Metrics HTTP/protobuf 上报。
 
 主流程：
 
@@ -12,8 +12,9 @@
 2. hook 从 stdin 读取 Codex 传入的 `transcript_path`
 3. `src/codex-parse.js` 解析 rollout JSONL
 4. `src/codex-collector.js` 生成 `agent_run`、`llm`、`assistant`、`tool:<name>` span
-5. `src/codex-otlp.js` 和 `src/proto.js` 编码 OTLP Trace protobuf
-6. 按 `~/.codex/gtrace.json` 或项目 `.codex/gtrace.json` 配置上报
+5. `src/codex-metrics.js` 从 span 派生 turn 级 metrics
+6. `src/codex-otlp.js` 和 `src/proto.js` 编码 OTLP Trace / Metrics protobuf
+7. 按 `~/.codex/gtrace.json` 或项目 `.codex/gtrace.json` 配置上报
 
 本项目还包含一个本地调试 ingest 服务 `src/server.js`，用于接收 OTLP JSON/protobuf 和原生 JSON 调试数据。
 
@@ -22,6 +23,7 @@
 ```text
 README.md                 项目使用说明
 docs/traces.md            Trace/span/字段/token/UI 展示设计说明
+docs/metrics.md           Metrics 指标体系、tag、token 映射和 OTLP 形态说明
 AGENTS.md                 Agent 维护指令
 package.json              Node.js 脚本与项目元信息
 scripts/install.sh        本地 Codex marketplace/plugin 安装脚本
@@ -30,9 +32,10 @@ src/codex-hook-wrapper.js Codex Stop hook 入口和远端上报
 src/codex-config.js       gtrace.json 与环境变量解析
 src/codex-parse.js        Codex rollout JSONL 解析
 src/codex-collector.js    Codex turn 到 span 的核心映射
-src/codex-otlp.js         内部 span 到 OTLP request 的转换
-src/proto.js              项目内最小 OTLP protobuf 编解码
-src/otlp.js               接收端 OTLP 规范化解析
+src/codex-metrics.js      从内部 span 派生 OTLP metrics 语义
+src/codex-otlp.js         内部 span/metric 到 OTLP request 的转换
+src/proto.js              项目内最小 OTLP Trace/Metrics protobuf 编解码
+src/otlp.js               接收端 OTLP Trace/Metrics 规范化解析
 src/server.js             本地 ingest/debug server
 src/store.js              本地 data/ 落盘调试
 test/ingest-smoke.test.js 集成/smoke 测试
@@ -54,7 +57,7 @@ npm ls --all
 当前目标是无运行时 npm 第三方依赖，`npm ls --all` 应保持：
 
 ```text
-gtrace@0.1.0 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.1 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 
@@ -80,6 +83,7 @@ Codex hook 读取配置顺序：
   "enabled": true,
   "endpoint": "https://llm-openway.guance.com",
   "tracePath": "v1/write/otel-llm",
+  "metricsPath": "v1/write/otel-metrics",
   "headers": {
     "X-Token": "<token>",
     "To-Headless": "true"
@@ -94,6 +98,7 @@ Codex hook 读取配置顺序：
 
 - `base_url`
 - `otel_traces_url`
+- `otel_metrics_url`
 - `public_key`
 - `secret_key`
 
@@ -154,11 +159,25 @@ Codex collector skips blank turns that only contain startup context
 
 ## Metrics 现状
 
-当前没有独立 OTLP Metrics、Prometheus Metrics 或 Counter/Gauge/Histogram 实现。
+当前已有独立 OTLP Metrics HTTP/protobuf 上报，触发时机与 traces 相同：Codex Stop hook 解析 rollout 后，从同批 spans 派生 metrics 并同步上报一次，不做周期性 flush。
 
-现有 token、耗时、状态都是 Trace span attributes，不是 Metrics 数据流。
+详细指标体系、tag、token 映射和 OTLP 形态统一维护在：
 
-如果后续补 metrics，建议从 trace 派生，并避免高基数 tag。不要默认把 `session_id`、`run_id` 放进 metrics tag。
+```text
+docs/metrics.md
+```
+
+第一版只做 turn 级核心指标：
+
+- `gen_ai.agent.request.count`
+- `gen_ai.agent.request.duration`
+- `gen_ai.agent.operation.count`
+- `gen_ai.agent.operation.duration`
+- `gen_ai.agent.token.usage`
+
+Metrics 默认带 `session_id` / `session_key`，用于与 trace 侧会话字段对齐；默认不带 `run_id`。不要新增 session 累计指标或 runtime 队列类指标，除非用户明确要求并同步设计去重状态。
+
+`usage_context_*` 不生成默认 token metric，避免把完整上下文口径当成本次新增 token 消耗。
 
 ## 修改约束
 
@@ -172,9 +191,10 @@ Codex collector skips blank turns that only contain startup context
    - `src/otlp.js`
    - `test/ingest-smoke.test.js`
    - `README.md`
+   - `docs/metrics.md`
    - `docs/traces.md`
    - `AGENTS.md`
-7. 修改 hook 上报协议时，必须验证 OTLP protobuf 路径，不只验证 JSON 路径。
+7. 修改 hook 上报协议时，必须验证 OTLP Trace 和 Metrics protobuf 路径，不只验证 JSON 路径。
 8. 不要把旧观测插件缓存当成本项目实现来源；本项目当前链路不依赖外部观测 SDK。
 
 ## 排查命令
@@ -195,5 +215,6 @@ ls -l ~/.codex/sessions/**/*.gtrace
 
 ```bash
 tail -n 20 data/spans.ndjson
+tail -n 20 data/metrics.ndjson
 ls -lt data/batches | head
 ```

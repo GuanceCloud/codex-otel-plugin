@@ -14,14 +14,19 @@ WRITE_CONFIG=1
 INSTALL_TYPE="${CODEX_OTEL_INSTALL_TYPE:-gtrace}"
 ENDPOINT="${GTRACE_ENDPOINT:-${CODEX_OTEL_ENDPOINT:-}}"
 TRACE_PATH="${GTRACE_TRACE_PATH:-${CODEX_OTEL_TRACE_PATH:-}}"
+METRICS_PATH="${GTRACE_METRICS_PATH:-${CODEX_OTEL_METRICS_PATH:-}}"
 X_TOKEN="${GTRACE_X_TOKEN:-${X_TOKEN:-}}"
 DEBUG="${GTRACE_CODEX_DEBUG:-true}"
 TAGS=()
 HEADERS=()
 TRACE_PATH_EXPLICIT=0
+METRICS_PATH_EXPLICIT=0
 
 if [[ -n "$TRACE_PATH" ]]; then
   TRACE_PATH_EXPLICIT=1
+fi
+if [[ -n "$METRICS_PATH" ]]; then
+  METRICS_PATH_EXPLICIT=1
 fi
 
 log() {
@@ -83,7 +88,7 @@ check_node_version() {
 usage() {
   cat <<HELP
 Usage:
-  scripts/install.sh [--refresh] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--trace-path PATH] [--tag KEY=VALUE] [--no-config]
+  scripts/install.sh [--refresh] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--trace-path PATH] [--metrics-path PATH] [--tag KEY=VALUE] [--no-config]
 
 Options:
   --refresh        Remove and re-add the installed plugin cache through Codex CLI.
@@ -91,6 +96,7 @@ Options:
   --endpoint       Receiver base URL, for example https://llm-openway.guance.com.
   --x-token        Dataway/GTrace X-Token. The value is written to gtrace.json and never printed.
   --trace-path     Trace route. Defaults to v1/write/otel-llm for gtrace and v1/traces for otlp.
+  --metrics-path   Metrics route. Defaults to v1/write/otel-metrics for gtrace and v1/metrics for otlp.
   --header         Extra HTTP header as KEY=VALUE. Can be repeated.
   --tag            Metadata tag as KEY=VALUE. Can be repeated.
   --config-file    Config file. Default: $CODEX_HOME/gtrace.json.
@@ -103,6 +109,8 @@ Environment variables:
   GTRACE_ENDPOINT         Same as --endpoint
   CODEX_OTEL_TRACE_PATH   Same as --trace-path
   GTRACE_TRACE_PATH       Same as --trace-path
+  CODEX_OTEL_METRICS_PATH Same as --metrics-path
+  GTRACE_METRICS_PATH     Same as --metrics-path
   GTRACE_X_TOKEN          Same as --x-token
   X_TOKEN                 Same as --x-token
   CODEX_OTEL_NODE         Node.js executable path when node is not in PATH
@@ -144,6 +152,16 @@ while [[ "$#" -gt 0 ]]; do
     --trace-path=*)
       TRACE_PATH="${1#*=}"
       TRACE_PATH_EXPLICIT=1
+      ;;
+    --metrics-path)
+      shift
+      [[ "$#" -gt 0 ]] || { echo "--metrics-path requires a path" >&2; exit 2; }
+      METRICS_PATH="$1"
+      METRICS_PATH_EXPLICIT=1
+      ;;
+    --metrics-path=*)
+      METRICS_PATH="${1#*=}"
+      METRICS_PATH_EXPLICIT=1
       ;;
     --x-token)
       shift
@@ -228,6 +246,13 @@ if [[ -z "$TRACE_PATH" && ( -n "$ENDPOINT" || ! -f "$CONFIG_FILE" || "$TRACE_PAT
     TRACE_PATH="v1/write/otel-llm"
   else
     TRACE_PATH="v1/traces"
+  fi
+fi
+if [[ -z "$METRICS_PATH" && ( -n "$ENDPOINT" || ! -f "$CONFIG_FILE" || "$METRICS_PATH_EXPLICIT" -eq 1 ) ]]; then
+  if [[ "$INSTALL_TYPE" == "gtrace" ]]; then
+    METRICS_PATH="v1/write/otel-metrics"
+  else
+    METRICS_PATH="v1/metrics"
   fi
 fi
 
@@ -419,6 +444,7 @@ write_config() {
   GTRACE_CONFIG_FILE_RUNTIME="$CONFIG_FILE" \
   GTRACE_ENDPOINT_RUNTIME="$ENDPOINT" \
   GTRACE_TRACE_PATH_RUNTIME="$TRACE_PATH" \
+  GTRACE_METRICS_PATH_RUNTIME="$METRICS_PATH" \
   GTRACE_INSTALL_TYPE_RUNTIME="$INSTALL_TYPE" \
   GTRACE_X_TOKEN_RUNTIME="$X_TOKEN" \
   GTRACE_DEBUG_RUNTIME="$DEBUG" \
@@ -431,6 +457,7 @@ const path = require("path");
 const configFile = process.env.GTRACE_CONFIG_FILE_RUNTIME;
 const endpoint = process.env.GTRACE_ENDPOINT_RUNTIME || "";
 const tracePath = process.env.GTRACE_TRACE_PATH_RUNTIME || "";
+const metricsPath = process.env.GTRACE_METRICS_PATH_RUNTIME || "";
 const installType = process.env.GTRACE_INSTALL_TYPE_RUNTIME || "gtrace";
 const xToken = process.env.GTRACE_X_TOKEN_RUNTIME || "";
 const debug = process.env.GTRACE_DEBUG_RUNTIME !== "false";
@@ -467,6 +494,7 @@ if (fs.existsSync(configFile)) {
 config.enabled = true;
 if (endpoint) config.endpoint = endpoint;
 if (tracePath) config.tracePath = tracePath;
+if (metricsPath) config.metricsPath = metricsPath;
 config.debug = debug;
 config.headers = normalizeHeaders(config.headers);
 
@@ -514,6 +542,7 @@ if [[ "$WRITE_CONFIG" -eq 1 ]]; then
       log "configured endpoint: $ENDPOINT"
     fi
     log "configured trace path: $TRACE_PATH"
+    log "configured metrics path: $METRICS_PATH"
     if [[ -n "$X_TOKEN" ]]; then
       log "configured X-Token: <redacted>"
     fi

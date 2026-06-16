@@ -111,6 +111,22 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
   | bash -s -- latest --no-config
 ```
 
+安装后最小自检：
+
+```bash
+codex plugin list
+codex plugin marketplace list
+find ~/.codex/plugins/cache/codex-otel-plugin/tracing -maxdepth 2 -type d | sort
+cat ~/.codex/gtrace.json
+```
+
+预期结果：
+
+- `codex plugin list` 中存在 `tracing@codex-otel-plugin`，状态为 `installed, enabled`
+- `codex plugin marketplace list` 中存在 `codex-otel-plugin`，root 为 `~/.codex/plugin-sources/codex-otel-plugin`
+- cache 目录中存在版本目录，例如 `~/.codex/plugins/cache/codex-otel-plugin/tracing/0.1.0`
+- `~/.codex/gtrace.json` 中包含 `endpoint`、`tracePath`、`headers.X-Token`
+
 ## 升级
 
 升级也使用同一条命令。已安装过的环境可以省略 `--endpoint` 和 `--x-token`，脚本会复用现有 `~/.codex/gtrace.json`：

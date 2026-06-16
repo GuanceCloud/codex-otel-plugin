@@ -1,5 +1,6 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import { loadRollout, parseSession } from "./codex-parse.js";
@@ -106,6 +107,14 @@ function durationMs(start, end) {
   return end - start;
 }
 
+function normalizeBounds(start, end) {
+  if (!Number.isFinite(start)) return { start, end };
+  return {
+    start,
+    end: Number.isFinite(end) && end > start ? end : start + 1,
+  };
+}
+
 function setAttr(attributes, key, value) {
   if (value !== undefined && value !== null) attributes[key] = value;
 }
@@ -127,17 +136,18 @@ function makeSpan({
   ingest,
   status,
 }) {
+  const bounds = normalizeBounds(start, end);
   return {
     trace_id: traceId,
     span_id: spanId,
     parent_id: parentId,
     name,
     kind: "SPAN_KIND_INTERNAL",
-    start_time_unix_nano: nsFromMs(start).toString(),
-    end_time_unix_nano: nsFromMs(end).toString(),
-    start_time: isoFromMs(start),
-    end_time: isoFromMs(end),
-    duration_ms: durationMs(start, end),
+    start_time_unix_nano: nsFromMs(bounds.start).toString(),
+    end_time_unix_nano: nsFromMs(bounds.end).toString(),
+    start_time: isoFromMs(bounds.start),
+    end_time: isoFromMs(bounds.end),
+    duration_ms: durationMs(bounds.start, bounds.end),
     status: status ?? { code: "STATUS_CODE_UNSET" },
     attributes,
     resource,
@@ -220,10 +230,15 @@ function assistantMessagesFromStep(step) {
   return [];
 }
 
+function latestStepChildEndTime(step) {
+  const assistantEnds = assistantMessagesFromStep(step).map((message) => message.endTime ?? message.startTime);
+  const toolEnds = step.toolCalls.map((tc) => tc.endTime ?? step.endTime);
+  return Math.max(step.endTime, ...assistantEnds, ...toolEnds);
+}
+
 function commonAttributes(config, sessionMeta) {
   const attributes = {
     session_id: sessionMeta.sessionId,
-    session_key: sessionMeta.sessionId,
     session_agent: "codex",
     request_type: "user_request",
     is_internal_request: false,
@@ -239,6 +254,7 @@ function resourceAttributes(config, sessionMeta) {
     "telemetry.sdk.language": "nodejs",
     "telemetry.sdk.name": "gtrace",
     "telemetry.sdk.version": "0.1.0",
+    host: os.hostname(),
     agent_runtime: "codex",
     agent_version: sessionMeta.cliVersion,
     runtime_environment: config.environment,
@@ -265,6 +281,9 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   setAttr(rootAttributes, "run_ids", turn.turnId);
   setAttr(rootAttributes, "provider_name", sessionMeta.modelProvider);
   setAttr(rootAttributes, "model_name", turn.model);
+  setAttr(rootAttributes, "session_create_at", sessionMeta.createdAt);
+  setAttr(rootAttributes, "session_updated_at", isoFromMs(turn.endTime));
+  setAttr(rootAttributes, "session_channel", sessionMeta.channel);
   setAttr(rootAttributes, "input_preview", preview(turn.userInput, maxChars));
   setAttr(rootAttributes, "input_length", turn.userInput?.length);
   setAttr(rootAttributes, "output_preview", preview(turn.finalOutput, maxChars));
@@ -302,6 +321,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   turn.steps.forEach((step, index) => {
     const generationSpanId = randomSpanId();
     const usage = usageDetails(step.usage);
+    const llmEndTime = latestStepChildEndTime(step);
     const generationInput = index === 0 ? clipValue(turn.userInput, maxChars) : previousToolResults;
     const generationOutput = buildGenerationOutput(step, maxChars);
     const attributes = commonAttributes(config, sessionMeta);
@@ -332,7 +352,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
         parentId: rootSpanId,
         name: "llm",
         start: step.startTime,
-        end: step.endTime,
+        end: llmEndTime,
         attributes,
         resource,
         scope,

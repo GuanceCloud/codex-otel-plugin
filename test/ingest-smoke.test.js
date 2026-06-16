@@ -180,6 +180,8 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     "gtrace-codex",
   );
   const traceResourceAttrs = batch.raw_request.resourceSpans[0].resource.attributes;
+  assert.equal(typeof attrValue(traceResourceAttrs, "host"), "string");
+  assert.ok(attrValue(traceResourceAttrs, "host").length > 0);
   assert.equal(attrValue(traceResourceAttrs, "deployment.environment"), "test");
   assert.equal(attrValue(traceResourceAttrs, "app_id"), "codex-monitor");
   assert.equal(attrValue(traceResourceAttrs, "app_name"), "Codex OTEL");
@@ -191,6 +193,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   );
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("request_model"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("response_model"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("session_key"), false);
   assert.equal(uploadedSpans[0].name, "agent_run");
   assert.equal(uploadedSpans[1].name, "llm");
   assert.equal(
@@ -206,6 +209,9 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     "completed",
   );
   const agentRun = uploadedSpans[0];
+  assert.equal(attrValue(agentRun.attributes, "session_create_at"), "2026-06-03T09:59:58.000Z");
+  assert.equal(attrValue(agentRun.attributes, "session_updated_at"), "2026-06-03T10:00:04.400Z");
+  assert.equal(attrValue(agentRun.attributes, "session_channel"), "cli");
   assert.equal(attrValue(agentRun.attributes, "usage_input_tokens"), 200);
   assert.equal(attrValue(agentRun.attributes, "usage_cache_read_input_tokens"), 50);
   assert.equal(attrValue(agentRun.attributes, "usage_cache_total_tokens"), 50);
@@ -216,6 +222,8 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(agentRun.attributes, "usage_reasoning_tokens"), 5);
 
   const llmSpans = uploadedSpans.filter((span) => span.name === "llm");
+  assert.ok(llmSpans.every((span) => spanEndNs(span) > spanStartNs(span)));
+  assert.ok(llmSpans.every((span) => attrValue(span.attributes, "session_key") === undefined));
   const cachedLlm = llmSpans.find(
     (span) => attrValue(span.attributes, "usage_context_total_tokens") === 180,
   );
@@ -249,6 +257,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   );
   const toolSpan = uploadedSpans.find((span) => span.name === "tool:exec_command");
   assert.equal(attrValue(toolSpan.attributes, "tool_command"), "ls");
+  assert.ok(spanEndNs(toolSpan) <= spanEndNs(cachedLlm));
   assert.equal(listed.data.at(-1).gtrace.trace.session_id, "sess-basic");
   assert.equal(
     listed.data.find((span) => span.gtrace.observation.type === "llm").gtrace.observation.model_name,
@@ -260,6 +269,8 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.match(metricsBatch.ingest.content_type, /application\/x-protobuf/);
   assert.equal(metricsBatch.ingest.sdk_name, "gtrace-codex");
   const metricResourceAttrs = metricsBatch.raw_request.resourceMetrics[0].resource.attributes;
+  assert.equal(typeof attrValue(metricResourceAttrs, "host"), "string");
+  assert.ok(attrValue(metricResourceAttrs, "host").length > 0);
   assert.equal(attrValue(metricResourceAttrs, "deployment.environment"), "test");
   assert.equal(attrValue(metricResourceAttrs, "app_id"), "codex-monitor");
   assert.equal(attrValue(metricResourceAttrs, "app_name"), "Codex OTEL");
@@ -580,6 +591,14 @@ function anyValueToPlain(value) {
   return undefined;
 }
 
+function spanStartNs(span) {
+  return BigInt(span.startTimeUnixNano ?? span.start_time_unix_nano ?? 0);
+}
+
+function spanEndNs(span) {
+  return BigInt(span.endTimeUnixNano ?? span.end_time_unix_nano ?? 0);
+}
+
 function collectOtlpAttributeKeys(request) {
   const keys = [];
   for (const resourceSpan of request.resourceSpans ?? []) {
@@ -703,6 +722,8 @@ function buildCodexRolloutFixture() {
       id: "sess-basic",
       cli_version: "0.123.0",
       model_provider: "openai",
+      timestamp: "2026-06-03T09:59:58.000Z",
+      source: "cli",
     }),
     row("2026-06-03T10:00:01.000Z", "event_msg", {
       type: "task_started",

@@ -114,13 +114,14 @@ Codex hook 读取配置顺序：
 
 全局筛选类 tag 应放在 OTLP `resource.attributes`，通过 `resourceAttributes` 配置或安装脚本 `--tag KEY=VALUE` 写入。推荐字段：
 
+- `host`
 - `deployment.environment`
 - `app_id`
 - `app_name`
 - `agent_type`
 - `agent_source`
 
-不要把 `run_id`、真实用户输入或高基数一次性字段放进 resource attributes。
+`host` 默认自动采集当前宿主机 hostname，也可通过 `resourceAttributes.host` 覆盖。不要把 `run_id`、真实用户输入或高基数一次性字段放进 resource attributes。
 
 ## Trace 字段规范
 
@@ -138,6 +139,7 @@ docs/traces.md
 - 工具调用 span name 是 `tool:<name>`
 - 工具命令字段使用 `tool_command`，从 `args.cmd` 或 `args.command` 提取
 - 字段使用扁平 canonical tag
+- `agent_run` 额外包含 `session_create_at`、`session_updated_at`、`session_channel`
 - 模型字段统一使用 `model_name`
 - 不再使用 `request_model` 和 `response_model`
 - 不生成旧兼容语义前缀字段

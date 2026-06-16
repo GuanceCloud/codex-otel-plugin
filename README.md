@@ -356,8 +356,10 @@ agent_run
 - `llm` 表示一次模型调用。
 - `assistant` 表示一次助手消息输出，parent 是对应的 `llm` span；同一个 `llm` step 内最多生成一个聚合后的 `assistant` span。
 - `tool:<name>` 表示一次工具调用。
+- `llm` span 的结束时间至少覆盖其下 assistant / tool 子节点，避免父节点显示为 `0ns` 而子节点仍有持续时间。
 - 字段使用扁平 canonical tag。
 - 模型字段统一使用 `model_name`。
+- `agent_run` 额外包含 `session_create_at`、`session_updated_at`、`session_channel` 三个会话级字段。
 - `llm` span 的 `usage_*` 是单次模型调用口径。
 - `agent_run` span 的 `usage_*` 是当前 turn 汇总口径。
 - `assistant` span 不携带 `usage_*`，避免重复计算 token。
@@ -382,11 +384,14 @@ Metrics 默认带 `session_id`，不带 `session_key` / `run_id`。
 
 全局筛选类 tag 建议放在 `resourceAttributes`，trace 和 metrics 会共享同一批 resource attributes。推荐最小组合：
 
+- `host`
 - `deployment.environment`
 - `app_id`
 - `app_name`
 - `agent_type`
 - `agent_source`
+
+`host` 默认会自动采集当前宿主机 hostname，也可以通过 `resourceAttributes.host` 覆盖。
 
 ## 验证
 

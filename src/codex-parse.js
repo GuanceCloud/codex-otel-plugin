@@ -92,6 +92,12 @@ function newTurn(startTime) {
   };
 }
 
+function normalizeIsoTimestamp(value, fallbackTs) {
+  if (typeof value === "string" && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+  if (Number.isFinite(fallbackTs)) return new Date(fallbackTs).toISOString();
+  return undefined;
+}
+
 export function parseSession(lines) {
   let sessionMeta = { sessionId: "unknown" };
   const turns = [];
@@ -235,6 +241,12 @@ export function parseSession(lines) {
         cliVersion: p.cli_version,
         modelProvider: p.model_provider ?? undefined,
         baseInstructions: p.base_instructions?.text,
+        createdAt: normalizeIsoTimestamp(p.timestamp, ts),
+        channel:
+          (typeof p.source === "string" && p.source) ||
+          (typeof p.originator === "string" && p.originator) ||
+          (typeof p.thread_source === "string" && p.thread_source) ||
+          undefined,
       };
       continue;
     }

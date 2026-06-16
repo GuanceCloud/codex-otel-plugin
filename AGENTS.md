@@ -11,7 +11,7 @@
 1. Codex Stop hook 执行 `src/codex-hook-wrapper.js`
 2. hook 从 stdin 读取 Codex 传入的 `transcript_path`
 3. `src/codex-parse.js` 解析 rollout JSONL
-4. `src/codex-collector.js` 生成 `agent_run`、`llm`、`tool:<name>` span
+4. `src/codex-collector.js` 生成 `agent_run`、`llm`、`assistant`、`tool:<name>` span
 5. `src/codex-otlp.js` 和 `src/proto.js` 编码 OTLP Trace protobuf
 6. 按 `~/.codex/gtrace.json` 或项目 `.codex/gtrace.json` 配置上报
 
@@ -111,6 +111,7 @@ docs/traces.md
 
 - 根 span name 是 `agent_run`
 - 模型调用 span name 是 `llm`
+- 助手消息 span name 是 `assistant`，parent 是对应的 `llm` span
 - 工具调用 span name 是 `tool:<name>`
 - 字段使用扁平 canonical tag
 - 模型字段统一使用 `model_name`
@@ -129,7 +130,7 @@ Token 口径：
 - `usage_context_input_tokens`: 原始完整上下文输入 token
 - `usage_context_total_tokens`: 原始完整上下文总 token
 
-`llm` span 上的 `usage_*` 表示单次模型调用；`agent_run` span 上的 `usage_*` 表示当前 turn 汇总。
+`llm` span 上的 `usage_*` 表示单次模型调用；`agent_run` span 上的 `usage_*` 表示当前 turn 汇总；`assistant` span 不携带 `usage_*`，避免重复计算 token。
 
 ## 状态逻辑
 
@@ -141,7 +142,7 @@ Token 口径：
 
 `src/codex-parse.js` 已处理 Stop hook 早于 `task_complete` 写入的情况。若已有 `agent_message`、assistant 最终输出或带文本 step，会推断为 completed。
 
-`src/codex-collector.js` 会跳过空白 turn。没有真实用户输入、模型输出、工具调用或 token usage 的启动上下文，不应生成 `agent_run`、`llm` 或 `tool:*` span。
+`src/codex-collector.js` 会跳过空白 turn。没有真实用户输入、模型输出、工具调用或 token usage 的启动上下文，不应生成 `agent_run`、`llm`、`assistant` 或 `tool:*` span。
 
 修改该逻辑时必须保留或更新测试：
 

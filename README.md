@@ -7,7 +7,7 @@
 ## 能力概览
 
 - 采集 Codex turn、模型调用、工具调用和 token usage。
-- 生成 `agent_run`、`llm`、`tool:<name>` 三类 span。
+- 生成 `agent_run`、`llm`、`assistant`、`tool:<name>` 四类 span。
 - 使用 OTLP Trace HTTP/protobuf 上报。
 - 支持 Dataway/GTrace 风格的 `endpoint + tracePath + headers` 配置。
 - 提供本地 ingest/debug server，便于接收和检查 OTLP JSON/protobuf 数据。
@@ -318,9 +318,11 @@ data/spans.ndjson
 ```text
 agent_run
 ├── llm
+│   ├── assistant
 │   ├── tool:exec_command
 │   └── tool:apply_patch
 ├── llm
+│   └── assistant
 └── llm
 ```
 
@@ -328,11 +330,13 @@ agent_run
 
 - `agent_run` 表示一次 Codex turn 的根 span。
 - `llm` 表示一次模型调用。
+- `assistant` 表示一次助手消息输出，parent 是对应的 `llm` span。
 - `tool:<name>` 表示一次工具调用。
 - 字段使用扁平 canonical tag。
 - 模型字段统一使用 `model_name`。
 - `llm` span 的 `usage_*` 是单次模型调用口径。
 - `agent_run` span 的 `usage_*` 是当前 turn 汇总口径。
+- `assistant` span 不携带 `usage_*`，避免重复计算 token。
 - 只有启动上下文、没有真实用户输入、模型输出、工具调用或 token usage 的空白 turn 不会上报。
 
 详细字段说明见 [docs/traces.md](docs/traces.md)。

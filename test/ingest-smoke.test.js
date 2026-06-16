@@ -162,6 +162,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /uploaded spans/);
 
   const batch = await latestBatch();
+  const uploadedSpans = batch.raw_request.resourceSpans[0].scopeSpans[0].spans;
   assert.ok(batch.raw_request.resourceSpans, "hook should upload OTLP resourceSpans");
   assert.equal(batch.raw_request.type, undefined);
   assert.match(batch.ingest.content_type, /application\/x-protobuf/);
@@ -176,21 +177,21 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   );
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("request_model"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("response_model"), false);
-  assert.equal(batch.raw_request.resourceSpans[0].scopeSpans[0].spans[0].name, "agent_run");
-  assert.equal(batch.raw_request.resourceSpans[0].scopeSpans[0].spans[1].name, "llm");
+  assert.equal(uploadedSpans[0].name, "agent_run");
+  assert.equal(uploadedSpans[1].name, "llm");
   assert.equal(
-    attrValue(batch.raw_request.resourceSpans[0].scopeSpans[0].spans[0].attributes, "model_name"),
+    attrValue(uploadedSpans[0].attributes, "model_name"),
     "gpt-5.4",
   );
   assert.equal(
-    attrValue(batch.raw_request.resourceSpans[0].scopeSpans[0].spans[0].attributes, "provider_name"),
+    attrValue(uploadedSpans[0].attributes, "provider_name"),
     "openai",
   );
   assert.equal(
-    attrValue(batch.raw_request.resourceSpans[0].scopeSpans[0].spans[0].attributes, "final_status"),
+    attrValue(uploadedSpans[0].attributes, "final_status"),
     "completed",
   );
-  const agentRun = batch.raw_request.resourceSpans[0].scopeSpans[0].spans[0];
+  const agentRun = uploadedSpans[0];
   assert.equal(attrValue(agentRun.attributes, "usage_input_tokens"), 200);
   assert.equal(attrValue(agentRun.attributes, "usage_cache_read_input_tokens"), 50);
   assert.equal(attrValue(agentRun.attributes, "usage_cache_total_tokens"), 50);
@@ -200,7 +201,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(agentRun.attributes, "usage_context_total_tokens"), 180);
   assert.equal(attrValue(agentRun.attributes, "usage_reasoning_tokens"), 5);
 
-  const llmSpans = batch.raw_request.resourceSpans[0].scopeSpans[0].spans.filter((span) => span.name === "llm");
+  const llmSpans = uploadedSpans.filter((span) => span.name === "llm");
   const cachedLlm = llmSpans.find(
     (span) => attrValue(span.attributes, "usage_context_total_tokens") === 180,
   );
@@ -212,10 +213,25 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(cachedLlm.attributes, "usage_context_input_tokens"), 150);
   assert.equal(attrValue(cachedLlm.attributes, "usage_context_total_tokens"), 180);
 
-  const listed = await fetch(`${baseUrl}/traces?limit=4`).then((res) => res.json());
+  const assistantSpan = uploadedSpans.find((span) => span.name === "assistant");
+  assert.equal(attrValue(assistantSpan.attributes, "role"), "assistant");
+  assert.equal(
+    attrValue(assistantSpan.attributes, "output_preview"),
+    "There are two files: file1.txt and file2.txt.",
+  );
+  assert.equal(
+    attrValue(assistantSpan.attributes, "assistant_message_start_time"),
+    "2026-06-03T10:00:04.000Z",
+  );
+  assert.equal(
+    attrValue(assistantSpan.attributes, "assistant_message_event_time"),
+    "2026-06-03T10:00:04.300Z",
+  );
+
+  const listed = await fetch(`${baseUrl}/traces?limit=5`).then((res) => res.json());
   assert.deepEqual(
     listed.data.map((span) => span.gtrace.observation.type).sort(),
-    ["agent", "llm", "llm", "tool"].sort(),
+    ["agent", "assistant", "llm", "llm", "tool"].sort(),
   );
   assert.equal(listed.data.at(-1).gtrace.trace.session_id, "sess-basic");
   assert.equal(
@@ -251,6 +267,8 @@ test("Codex parser infers completed status when Stop hook runs before task_compl
   assert.equal(turns.length, 1);
   assert.equal(turns[0].completed, true);
   assert.equal(turns[0].finalOutput, "done");
+  assert.equal(turns[0].steps[0].assistantMessages[0].startTime, Date.parse("2026-06-03T10:00:03.000Z"));
+  assert.equal(turns[0].steps[0].assistantMessages[0].eventTime, Date.parse("2026-06-03T10:00:03.000Z"));
 });
 
 test("Codex collector skips blank turns that only contain startup context", async () => {

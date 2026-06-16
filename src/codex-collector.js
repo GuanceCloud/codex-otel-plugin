@@ -165,6 +165,7 @@ function extractGtrace(attributes, spanName) {
 function observationTypeFromSpanName(spanName) {
   if (spanName === "agent_run") return "agent";
   if (spanName === "llm") return "llm";
+  if (spanName === "assistant") return "assistant";
   if (String(spanName).startsWith("tool:")) return "tool";
   return undefined;
 }
@@ -198,6 +199,16 @@ function buildGenerationOutput(step, maxChars) {
     }));
   }
   return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function assistantMessagesFromStep(step) {
+  if (Array.isArray(step.assistantMessages) && step.assistantMessages.length > 0) {
+    return step.assistantMessages.filter((message) => preview(message.text, 1));
+  }
+  if (preview(step.text, 1)) {
+    return [{ text: step.text, startTime: step.startTime, endTime: step.endTime }];
+  }
+  return [];
 }
 
 function commonAttributes(config, sessionMeta) {
@@ -313,6 +324,47 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
         ingest,
       }),
     );
+
+    assistantMessagesFromStep(step).forEach((message, messageIndex) => {
+      const assistantStart = Number.isFinite(message.startTime) ? message.startTime : step.startTime;
+      const assistantEnd =
+        Number.isFinite(message.endTime) && message.endTime >= assistantStart
+          ? message.endTime
+          : assistantStart;
+      const assistantAttributes = commonAttributes(config, sessionMeta);
+      setAttr(assistantAttributes, "run_id", turn.turnId);
+      setAttr(assistantAttributes, "run_ids", turn.turnId);
+      setAttr(assistantAttributes, "provider_name", sessionMeta.modelProvider);
+      setAttr(assistantAttributes, "model_name", turn.model);
+      setAttr(assistantAttributes, "role", "assistant");
+      setAttr(assistantAttributes, "output_preview", preview(message.text, maxChars));
+      setAttr(assistantAttributes, "output_length", message.text?.length);
+      setAttr(assistantAttributes, "output_kind", "text");
+      setAttr(assistantAttributes, "assistant_message_start_time", isoFromMs(assistantStart));
+      setAttr(assistantAttributes, "assistant_message_end_time", isoFromMs(assistantEnd));
+      setAttr(
+        assistantAttributes,
+        "assistant_message_event_time",
+        Number.isFinite(message.eventTime) ? isoFromMs(message.eventTime) : undefined,
+      );
+      setAttr(assistantAttributes, "step_index", index);
+      setAttr(assistantAttributes, "message_index", messageIndex);
+      setAttr(assistantAttributes, "status", "ok");
+
+      spans.push(
+        makeSpan({
+          traceId,
+          parentId: generationSpanId,
+          name: "assistant",
+          start: assistantStart,
+          end: assistantEnd,
+          attributes: assistantAttributes,
+          resource,
+          scope,
+          ingest,
+        }),
+      );
+    });
 
     for (const tc of step.toolCalls) {
       const toolAttributes = commonAttributes(config, sessionMeta);

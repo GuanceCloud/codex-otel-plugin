@@ -101,7 +101,7 @@ export function parseSession(lines) {
   let lastTimestamp = Date.now();
 
   function newStep(startTime) {
-    return { startTime, endTime: startTime, toolCalls: [] };
+    return { startTime, endTime: startTime, toolCalls: [], assistantMessages: [] };
   }
 
   function ensureTurn(ts) {
@@ -120,6 +120,30 @@ export function parseSession(lines) {
     if (usage) step.usage = usage;
     turn.steps.push(step);
     step = null;
+  }
+
+  function recordAssistantMessage(targetStep, text, ts, eventTime) {
+    targetStep.text = targetStep.text ? `${targetStep.text}\n${text}` : text;
+    targetStep.assistantMessages.push({
+      text,
+      startTime: ts,
+      endTime: eventTime ? Math.max(ts, eventTime) : ts,
+      ...(eventTime ? { eventTime } : {}),
+    });
+    targetStep.endTime = Math.max(targetStep.endTime, eventTime ?? ts);
+  }
+
+  function attachAgentMessage(text, ts) {
+    const targetStep = step ?? turn.steps.at(-1);
+    const lastMessage = targetStep?.assistantMessages?.at(-1);
+    if (lastMessage && lastMessage.text === text) {
+      lastMessage.eventTime = ts;
+      lastMessage.endTime = Math.max(lastMessage.endTime, ts);
+      targetStep.endTime = Math.max(targetStep.endTime, ts);
+      return;
+    }
+
+    recordAssistantMessage(ensureStep(ts), text, ts, ts);
   }
 
   function inferCompleted(currentTurn) {
@@ -183,7 +207,7 @@ export function parseSession(lines) {
         const text = extractMessageText(p.content);
         if (p.role === "assistant") {
           const s = ensureStep(ts);
-          if (text) s.text = s.text ? `${s.text}\n${text}` : text;
+          if (text) recordAssistantMessage(s, text, ts);
         } else if (p.role === "user" && text) {
           if (!turn.userInputFallback && !isSyntheticUserContext(text)) {
             turn.userInputFallback = text;
@@ -242,6 +266,7 @@ export function parseSession(lines) {
         if (!turn.userInput) turn.userInput = p.message;
       } else if (et === "agent_message" && typeof p.message === "string") {
         turn.lastAgentMessage = p.message;
+        attachAgentMessage(p.message, ts);
       } else if (et === "token_count") {
         if (p.info?.total_token_usage) turn.totalUsage = p.info.total_token_usage;
         closeStep(ts, p.info?.last_token_usage ?? undefined);

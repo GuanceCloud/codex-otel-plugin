@@ -61,7 +61,7 @@ Install options are passed to scripts/install.sh:
   --trace-path PATH
   --metrics-path PATH
   --header KEY=VALUE
-  --tag KEY=VALUE
+  --tag KEY=VALUE        Global resource attribute; can be repeated.
   --config-file PATH
   --codex-config PATH
   --no-config

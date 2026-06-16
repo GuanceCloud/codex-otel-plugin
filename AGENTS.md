@@ -88,6 +88,13 @@ Codex hook 读取配置顺序：
     "X-Token": "<token>",
     "To-Headless": "true"
   },
+  "resourceAttributes": {
+    "deployment.environment": "prod",
+    "app_id": "codex-monitor",
+    "app_name": "Codex OTEL",
+    "agent_type": "assistant",
+    "agent_source": "codex"
+  },
   "debug": true
 }
 ```
@@ -101,8 +108,19 @@ Codex hook 读取配置顺序：
 - `otel_metrics_url`
 - `public_key`
 - `secret_key`
+- `resourceAttributes`
 
 如果 `headers.Authorization` 已存在，不要覆盖；否则可用 `public_key` / `secret_key` 自动补 Basic Auth。
+
+全局筛选类 tag 应放在 OTLP `resource.attributes`，通过 `resourceAttributes` 配置或安装脚本 `--tag KEY=VALUE` 写入。推荐字段：
+
+- `deployment.environment`
+- `app_id`
+- `app_name`
+- `agent_type`
+- `agent_source`
+
+不要把 `run_id`、真实用户输入或高基数一次性字段放进 resource attributes。
 
 ## Trace 字段规范
 

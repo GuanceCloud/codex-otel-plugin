@@ -101,6 +101,13 @@ enabled = true
     "X-Token": "<token>",
     "To-Headless": "true"
   },
+  "resourceAttributes": {
+    "deployment.environment": "prod",
+    "app_id": "codex-monitor",
+    "app_name": "Codex OTEL",
+    "agent_type": "assistant",
+    "agent_source": "codex"
+  },
   "debug": true
 }
 ```
@@ -185,7 +192,7 @@ codex plugin remove tracing@codex-otel-plugin
 | `--metrics-path PATH` | Metrics 写入路径，GTrace 默认 `v1/write/otel-metrics` |
 | `--type gtrace|otlp` | 配置预设，默认 `gtrace` |
 | `--header KEY=VALUE` | 追加 HTTP header，可重复 |
-| `--tag KEY=VALUE` | 追加 metadata/tag，可重复 |
+| `--tag KEY=VALUE` | 追加全局 resource attribute，同时兼容写入 metadata，可重复 |
 | `--config-file PATH` | 指定上报配置文件，默认 `~/.codex/gtrace.json` |
 | `--codex-config PATH` | 指定 Codex 配置文件，默认 `~/.codex/config.toml` |
 | `--no-config` | 只安装插件，不写 `gtrace.json` |
@@ -235,6 +242,10 @@ Hook 会读取以下配置：
   "endpoint": "http://localhost:3030",
   "tracePath": "api/public/otel/v1/traces",
   "metricsPath": "api/public/otel/v1/metrics",
+  "resourceAttributes": {
+    "deployment.environment": "dev",
+    "app_id": "codex-local"
+  },
   "debug": true
 }
 ```
@@ -276,6 +287,7 @@ export GTRACE_TRACE_PATH="v1/traces"
 export GTRACE_METRICS_PATH="v1/metrics"
 export GTRACE_OTEL_TRACES_URL="http://localhost:4318/v1/traces"
 export GTRACE_OTEL_METRICS_URL="http://localhost:4318/v1/metrics"
+export GTRACE_CODEX_RESOURCE_ATTRIBUTES='{"deployment.environment":"dev","app_id":"codex-local"}'
 export GTRACE_CODEX_DEBUG=true
 ```
 
@@ -367,6 +379,14 @@ Metrics 与 traces 在同一次 Stop hook 中上报，第一版只从当前 turn
 | `gen_ai.agent.token.usage` | Histogram | `{token}` | 每个 `llm` span 的 `usage_*` 字段 |
 
 Metrics 默认带 `session_id` / `session_key`，不带 `run_id`。
+
+全局筛选类 tag 建议放在 `resourceAttributes`，trace 和 metrics 会共享同一批 resource attributes。推荐最小组合：
+
+- `deployment.environment`
+- `app_id`
+- `app_name`
+- `agent_type`
+- `agent_source`
 
 ## 验证
 

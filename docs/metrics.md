@@ -12,6 +12,7 @@ Metrics 用于支撑 Codex turn、模型调用、工具调用和 token 消耗的
 - 指标名参考 `openclaw-otel-plugin` 当前推荐的 `gen_ai.agent.*` 命名。
 - 保持 canonical tag，避免新增 `gtrace.*` 或旧兼容语义前缀字段。
 - 默认带 `session_id` / `session_key`，用于和 trace 侧会话字段对齐；默认不带 `run_id`。
+- 全局筛选类 tag 放在 OTLP `resource.attributes`，trace 和 metrics 共享同一批 resource attributes。
 
 ## 上报链路
 
@@ -53,6 +54,32 @@ POST <endpoint>/<metricsPath>
 - `gen_ai.client.*`: 保留给 OTEL 原生 GenAI client 语义，本插件当前不写自定义数据。
 
 ## Tag 设计
+
+### Resource Attributes
+
+resource attributes 适合放“一个实例/一个 Agent/一个部署周期内相对稳定”的全局 tag。当前默认包含：
+
+| 字段 | 来源 | 说明 |
+| --- | --- | --- |
+| `service.name` | 固定值 | 当前为 `gtrace-codex`。 |
+| `telemetry.sdk.language` | 固定值 | 当前为 `nodejs`。 |
+| `telemetry.sdk.name` | 固定值 | 当前为 `gtrace`。 |
+| `telemetry.sdk.version` | 固定值 | 当前插件内置采集版本。 |
+| `agent_runtime` | 固定值 | 当前为 `codex`。 |
+| `agent_version` | rollout session meta | Codex CLI 版本。 |
+| `runtime_environment` | 配置 `environment` | 运行环境。 |
+
+推荐额外补充：
+
+| 字段 | 说明 |
+| --- | --- |
+| `deployment.environment` | prod/test/dev 等环境隔离。 |
+| `app_id` | 监测应用或 Agent 应用 ID。 |
+| `app_name` | 页面展示用应用名。 |
+| `agent_type` | Agent 类型，例如 `assistant`、`workflow-agent`。 |
+| `agent_source` | Agent 来源，例如 `codex`、`sdk`、`api`。 |
+
+`resourceAttributes` 会合并到 trace resource 和 metrics resource。安装脚本的 `--tag KEY=VALUE` 也会写入 `resourceAttributes`。
 
 ### 通用 Tags
 

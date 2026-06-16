@@ -53,6 +53,28 @@ function parseMetadata(value) {
   }
 }
 
+function parseResourceAttributes(value) {
+  const parsed = parseMetadata(value);
+  if (!parsed) return undefined;
+  const attributes = {};
+  for (const [key, item] of Object.entries(parsed)) {
+    if (!key || item === undefined || item === null || item === "") continue;
+    if (["string", "number", "boolean"].includes(typeof item)) attributes[key] = item;
+  }
+  return Object.keys(attributes).length > 0 ? attributes : undefined;
+}
+
+function tagsToResourceAttributes(tags = []) {
+  const attributes = {};
+  for (const tag of tags) {
+    const [key, ...rest] = String(tag).split("=");
+    if (!key || rest.length === 0) continue;
+    const value = rest.join("=").trim();
+    if (value) attributes[key.trim()] = value;
+  }
+  return Object.keys(attributes).length > 0 ? attributes : undefined;
+}
+
 function normalizeEndpoint(endpoint) {
   const trimmed = typeof endpoint === "string" ? endpoint.trim() : "";
   return trimmed ? trimmed.replace(/\/+$/, "") : "http://localhost:3030";
@@ -90,6 +112,12 @@ export function resolveConfig(options = {}) {
     ...localConfig,
   };
 
+  const tags = parseTags(env.GTRACE_CODEX_TAGS) ?? parseTags(merged.tags);
+  const configuredResourceAttributes = parseResourceAttributes(merged.resourceAttributes);
+  const envResourceAttributes = parseResourceAttributes(
+    env.GTRACE_CODEX_RESOURCE_ATTRIBUTES ?? env.GTRACE_RESOURCE_ATTRIBUTES,
+  );
+
   return {
     ...merged,
     enabled: parseBoolean(env.TRACE_TO_GTRACE) ?? parseBoolean(env.GTRACE_CODEX_ENABLED) ?? merged.enabled,
@@ -118,8 +146,13 @@ export function resolveConfig(options = {}) {
     headers: parseHeaders(merged.headers),
     environment: env.GTRACE_ENVIRONMENT ?? env.GTRACE_CODEX_ENVIRONMENT ?? merged.environment,
     user_id: env.GTRACE_CODEX_USER_ID ?? merged.user_id,
-    tags: parseTags(env.GTRACE_CODEX_TAGS) ?? parseTags(merged.tags),
+    tags,
     metadata: parseMetadata(env.GTRACE_CODEX_METADATA) ?? parseMetadata(merged.metadata),
+    resourceAttributes: {
+      ...(tagsToResourceAttributes(tags) ?? {}),
+      ...(configuredResourceAttributes ?? {}),
+      ...(envResourceAttributes ?? {}),
+    },
     max_chars: parseInteger(env.GTRACE_CODEX_MAX_CHARS) ?? parseInteger(merged.max_chars) ?? 20_000,
     debug: parseBoolean(env.GTRACE_CODEX_DEBUG) ?? parseBoolean(merged.debug) ?? false,
     fail_on_error:

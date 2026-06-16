@@ -138,6 +138,12 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
         headers: {
           "x-gtrace-sdk-name": "gtrace-codex",
         },
+        tags: ["app_name=Codex OTEL", "agent_source=codex-cli"],
+        resourceAttributes: {
+          "deployment.environment": "test",
+          app_id: "codex-monitor",
+          agent_type: "assistant",
+        },
         debug: true,
         fail_on_error: true,
         hook_log_file: path.join(home, ".codex", "gtrace-hook.log"),
@@ -173,6 +179,12 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     attrValue(batch.raw_request.resourceSpans[0].resource.attributes, "service.name"),
     "gtrace-codex",
   );
+  const traceResourceAttrs = batch.raw_request.resourceSpans[0].resource.attributes;
+  assert.equal(attrValue(traceResourceAttrs, "deployment.environment"), "test");
+  assert.equal(attrValue(traceResourceAttrs, "app_id"), "codex-monitor");
+  assert.equal(attrValue(traceResourceAttrs, "app_name"), "Codex OTEL");
+  assert.equal(attrValue(traceResourceAttrs, "agent_type"), "assistant");
+  assert.equal(attrValue(traceResourceAttrs, "agent_source"), "codex-cli");
   assert.deepEqual(
     collectOtlpAttributeKeys(batch.raw_request).filter((key) => key.startsWith("gtrace.")),
     [],
@@ -247,6 +259,11 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.ok(metricsBatch.raw_request.resourceMetrics, "hook should upload OTLP resourceMetrics");
   assert.match(metricsBatch.ingest.content_type, /application\/x-protobuf/);
   assert.equal(metricsBatch.ingest.sdk_name, "gtrace-codex");
+  const metricResourceAttrs = metricsBatch.raw_request.resourceMetrics[0].resource.attributes;
+  assert.equal(attrValue(metricResourceAttrs, "deployment.environment"), "test");
+  assert.equal(attrValue(metricResourceAttrs, "app_id"), "codex-monitor");
+  assert.equal(attrValue(metricResourceAttrs, "app_name"), "Codex OTEL");
+  assert.equal(metricsBatch.metrics[0].resource.app_id, "codex-monitor");
   assert.equal(metricsBatch.metric_count, 17);
   assert.deepEqual(
     Array.from(new Set(metricsBatch.metrics.map((metric) => metric.name))).sort(),

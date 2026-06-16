@@ -58,6 +58,20 @@ span 关系：
 | `resource` | OTLP resource attributes |
 | `scope` | OTLP instrumentation scope |
 
+默认 resource attributes：
+
+| 字段 | 含义 |
+| --- | --- |
+| `service.name` | 当前为 `gtrace-codex` |
+| `telemetry.sdk.language` | 当前为 `nodejs` |
+| `telemetry.sdk.name` | 当前为 `gtrace` |
+| `telemetry.sdk.version` | 当前插件内置采集版本 |
+| `agent_runtime` | 当前为 `codex` |
+| `agent_version` | Codex CLI 版本 |
+| `runtime_environment` | 运行环境，来自配置 `environment` |
+
+配置中的 `resourceAttributes` 会合并到每个 trace resource 上，适合放跨 trace/metric 统一筛选的全局 tag，例如 `deployment.environment`、`app_id`、`app_name`、`agent_type`、`agent_source`。
+
 ## Canonical Attributes
 
 Codex hook 默认使用扁平 canonical tag，不生成多层业务前缀字段。

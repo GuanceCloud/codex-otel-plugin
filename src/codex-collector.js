@@ -233,10 +233,7 @@ function commonAttributes(config, sessionMeta) {
   return attributes;
 }
 
-function buildTurnSpans(turn, sessionMeta, config, ctx) {
-  const maxChars = config.max_chars;
-  const traceId = ctx.traceId ?? randomTraceId();
-  const rootSpanId = ctx.parentSpanId ?? randomSpanId();
+function resourceAttributes(config, sessionMeta) {
   const resource = {
     "service.name": "gtrace-codex",
     "telemetry.sdk.language": "nodejs",
@@ -246,6 +243,15 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     agent_version: sessionMeta.cliVersion,
     runtime_environment: config.environment,
   };
+  for (const [key, value] of Object.entries(config.resourceAttributes ?? {})) setAttr(resource, key, value);
+  return resource;
+}
+
+function buildTurnSpans(turn, sessionMeta, config, ctx) {
+  const maxChars = config.max_chars;
+  const traceId = ctx.traceId ?? randomTraceId();
+  const rootSpanId = ctx.parentSpanId ?? randomSpanId();
+  const resource = resourceAttributes(config, sessionMeta);
   const scope = { name: "gtrace-codex-collector", version: "0.1.0", attributes: {} };
   const ingest = {
     source: "gtrace-codex-hook",

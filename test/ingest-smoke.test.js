@@ -271,6 +271,39 @@ test("Codex parser infers completed status when Stop hook runs before task_compl
   assert.equal(turns[0].steps[0].assistantMessages[0].eventTime, Date.parse("2026-06-03T10:00:03.000Z"));
 });
 
+test("Codex parser extends assistant message time to step end without agent_message match", () => {
+  const { turns } = parseSession([
+    row("2026-06-03T10:00:00.000Z", "session_meta", {
+      id: "sess-assistant-time",
+      cli_version: "0.139.0",
+      model_provider: "openai",
+    }),
+    row("2026-06-03T10:00:01.000Z", "event_msg", {
+      type: "task_started",
+      turn_id: "turn-assistant-time",
+    }),
+    row("2026-06-03T10:00:02.000Z", "response_item", {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "partial answer" }],
+    }),
+    row("2026-06-03T10:00:02.400Z", "event_msg", {
+      type: "token_count",
+      info: {
+        last_token_usage: {
+          input_tokens: 10,
+          output_tokens: 3,
+          total_tokens: 13,
+        },
+      },
+    }),
+  ]);
+
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].steps[0].assistantMessages[0].startTime, Date.parse("2026-06-03T10:00:02.000Z"));
+  assert.equal(turns[0].steps[0].assistantMessages[0].endTime, Date.parse("2026-06-03T10:00:02.400Z"));
+});
+
 test("Codex collector skips blank turns that only contain startup context", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "gtrace-blank-home-"));
   const rollout = path.join(home, "rollout-blank.jsonl");

@@ -117,9 +117,19 @@ export function parseSession(lines) {
   function closeStep(ts, usage) {
     if (!step) return;
     step.endTime = Math.max(step.endTime, ts);
+    finalizeAssistantMessageTimes(step, step.endTime);
     if (usage) step.usage = usage;
     turn.steps.push(step);
     step = null;
+  }
+
+  function finalizeAssistantMessageTimes(targetStep, fallbackEndTime) {
+    for (const [index, message] of targetStep.assistantMessages.entries()) {
+      if (message.eventTime || message.endTime > message.startTime) continue;
+      const nextMessage = targetStep.assistantMessages[index + 1];
+      const endTime = nextMessage?.startTime ?? fallbackEndTime;
+      message.endTime = Math.max(message.startTime, endTime);
+    }
   }
 
   function recordAssistantMessage(targetStep, text, ts, eventTime) {

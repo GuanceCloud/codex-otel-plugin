@@ -124,10 +124,9 @@ export function parseSession(lines) {
   }
 
   function finalizeAssistantMessageTimes(targetStep, fallbackEndTime) {
-    for (const [index, message] of targetStep.assistantMessages.entries()) {
+    for (const message of targetStep.assistantMessages) {
       if (message.endTime > message.startTime) continue;
-      const nextMessage = targetStep.assistantMessages[index + 1];
-      const endTime = message.eventTime ?? nextMessage?.startTime ?? fallbackEndTime;
+      const endTime = message.eventTime ?? fallbackEndTime;
       message.endTime = Math.max(message.startTime, endTime);
     }
   }
@@ -138,26 +137,34 @@ export function parseSession(lines) {
   }
 
   function recordAssistantMessage(targetStep, text, ts, eventTime) {
-    targetStep.text = targetStep.text ? `${targetStep.text}\n${text}` : text;
-    targetStep.assistantMessages.push({
-      text,
-      startTime: ts,
-      endTime: eventTime ? Math.max(ts, eventTime) : ts,
-      ...(eventTime ? { eventTime } : {}),
-    });
+    const message = targetStep.assistantMessages[0];
+    if (message) {
+      message.text = message.text ? `${message.text}\n${text}` : text;
+      message.endTime = Math.max(message.endTime, eventTime ?? ts);
+      message.responseItemCount = (message.responseItemCount ?? 1) + 1;
+      if (eventTime) message.eventTime = eventTime;
+    } else {
+      targetStep.assistantMessages.push({
+        text,
+        startTime: ts,
+        endTime: eventTime ? Math.max(ts, eventTime) : ts,
+        responseItemCount: eventTime ? 0 : 1,
+        ...(eventTime ? { eventTime } : {}),
+      });
+    }
+    refreshStepText(targetStep);
     targetStep.endTime = Math.max(targetStep.endTime, eventTime ?? ts);
   }
 
   function attachAgentMessage(text, ts) {
     const targetStep = step ?? turn.steps.at(-1);
     if (targetStep?.assistantMessages?.length > 0) {
-      const lastMessage = targetStep.assistantMessages.at(-1);
-      if (targetStep.assistantMessages.length === 1) {
-        lastMessage.text = text;
-        refreshStepText(targetStep);
-      }
-      lastMessage.eventTime = ts;
-      lastMessage.endTime = Math.max(lastMessage.endTime, ts);
+      const message = targetStep.assistantMessages[0];
+      message.text = text;
+      message.eventTime = ts;
+      message.endTime = Math.max(message.endTime, ts);
+      targetStep.assistantMessages = [message];
+      refreshStepText(targetStep);
       targetStep.endTime = Math.max(targetStep.endTime, ts);
       return;
     }

@@ -330,7 +330,7 @@ agent_run
 
 - `agent_run` 表示一次 Codex turn 的根 span。
 - `llm` 表示一次模型调用。
-- `assistant` 表示一次助手消息输出，parent 是对应的 `llm` span。
+- `assistant` 表示一次助手消息输出，parent 是对应的 `llm` span；同一个 `llm` step 内最多生成一个聚合后的 `assistant` span。
 - `tool:<name>` 表示一次工具调用。
 - 字段使用扁平 canonical tag。
 - 模型字段统一使用 `model_name`。

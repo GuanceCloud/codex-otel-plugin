@@ -345,6 +345,51 @@ test("Codex parser uses agent_message to update assistant timing without duplica
   assert.equal(turns[0].steps[0].assistantMessages[0].endTime, Date.parse("2026-06-03T10:00:02.250Z"));
 });
 
+test("Codex parser collapses multiple assistant response items into one step output", () => {
+  const { turns } = parseSession([
+    row("2026-06-03T10:00:00.000Z", "session_meta", {
+      id: "sess-assistant-collapse",
+      cli_version: "0.139.0",
+      model_provider: "openai",
+    }),
+    row("2026-06-03T10:00:01.000Z", "event_msg", {
+      type: "task_started",
+      turn_id: "turn-assistant-collapse",
+    }),
+    row("2026-06-03T10:00:02.000Z", "response_item", {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "first part" }],
+    }),
+    row("2026-06-03T10:00:02.100Z", "response_item", {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "second part" }],
+    }),
+    row("2026-06-03T10:00:02.300Z", "event_msg", {
+      type: "agent_message",
+      message: "final combined answer",
+    }),
+    row("2026-06-03T10:00:02.500Z", "event_msg", {
+      type: "token_count",
+      info: {
+        last_token_usage: {
+          input_tokens: 10,
+          output_tokens: 3,
+          total_tokens: 13,
+        },
+      },
+    }),
+  ]);
+
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].steps[0].assistantMessages.length, 1);
+  assert.equal(turns[0].steps[0].assistantMessages[0].text, "final combined answer");
+  assert.equal(turns[0].steps[0].assistantMessages[0].startTime, Date.parse("2026-06-03T10:00:02.000Z"));
+  assert.equal(turns[0].steps[0].assistantMessages[0].eventTime, Date.parse("2026-06-03T10:00:02.300Z"));
+  assert.equal(turns[0].steps[0].assistantMessages[0].endTime, Date.parse("2026-06-03T10:00:02.300Z"));
+});
+
 test("Codex collector skips blank turns that only contain startup context", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "gtrace-blank-home-"));
   const rollout = path.join(home, "rollout-blank.jsonl");

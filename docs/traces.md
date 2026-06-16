@@ -21,10 +21,12 @@ span 关系：
 
 - `agent_run` 是一个 Codex turn 的根 span。
 - `llm` 是一次模型调用，parent 是 `agent_run`。
-- `assistant` 是一次助手消息输出，parent 是对应的 `llm` span。
+- `assistant` 是一次助手消息输出，parent 是对应的 `llm` span；同一个 `llm` step 内最多生成一个聚合后的 `assistant` span。
 - `tool:<name>` 是一次工具调用，parent 是触发该工具调用的 `llm` span。
 - 一个 turn 内可能有多个 `llm` span，因为模型可能在工具调用前后多次生成响应。
-- 一个 `llm` span 下可能有 `assistant` span 和多个 `tool:<name>` span。
+- 一个 `llm` span 下可能有一个 `assistant` span 和多个 `tool:<name>` span。
+
+同一个 step 内的多条 assistant `response_item` 会聚合为一条 assistant 输出；若存在 Codex `agent_message` 事件，则把它视为该 step 的最终助手输出文本，并用于补齐 `assistant` span 的结束时间。
 
 ## Span Name
 

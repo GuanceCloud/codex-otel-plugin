@@ -125,11 +125,16 @@ export function parseSession(lines) {
 
   function finalizeAssistantMessageTimes(targetStep, fallbackEndTime) {
     for (const [index, message] of targetStep.assistantMessages.entries()) {
-      if (message.eventTime || message.endTime > message.startTime) continue;
+      if (message.endTime > message.startTime) continue;
       const nextMessage = targetStep.assistantMessages[index + 1];
-      const endTime = nextMessage?.startTime ?? fallbackEndTime;
+      const endTime = message.eventTime ?? nextMessage?.startTime ?? fallbackEndTime;
       message.endTime = Math.max(message.startTime, endTime);
     }
+  }
+
+  function refreshStepText(targetStep) {
+    const text = targetStep.assistantMessages.map((message) => message.text).filter(Boolean).join("\n");
+    if (text) targetStep.text = text;
   }
 
   function recordAssistantMessage(targetStep, text, ts, eventTime) {
@@ -145,8 +150,12 @@ export function parseSession(lines) {
 
   function attachAgentMessage(text, ts) {
     const targetStep = step ?? turn.steps.at(-1);
-    const lastMessage = targetStep?.assistantMessages?.at(-1);
-    if (lastMessage && lastMessage.text === text) {
+    if (targetStep?.assistantMessages?.length > 0) {
+      const lastMessage = targetStep.assistantMessages.at(-1);
+      if (targetStep.assistantMessages.length === 1) {
+        lastMessage.text = text;
+        refreshStepText(targetStep);
+      }
       lastMessage.eventTime = ts;
       lastMessage.endTime = Math.max(lastMessage.endTime, ts);
       targetStep.endTime = Math.max(targetStep.endTime, ts);

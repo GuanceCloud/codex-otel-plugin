@@ -231,7 +231,7 @@ if [[ -z "$TRACE_PATH" && ( -n "$ENDPOINT" || ! -f "$CONFIG_FILE" || "$TRACE_PAT
   fi
 fi
 
-VERSION="$("$NODE_BIN" -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.0')"
+VERSION="$("$NODE_BIN" -p "require('$REPO_ROOT/package.json').version" 2>/dev/null || printf '0.1.1')"
 CACHE_PLUGIN_ROOT="$CODEX_HOME/plugins/cache/$MARKETPLACE_NAME/$PLUGIN_NAME/$VERSION"
 CACHE_HOOK_SCRIPT="$CACHE_PLUGIN_ROOT/src/codex-hook-wrapper.js"
 HOOK_COMMAND="$NODE_BIN $CACHE_HOOK_SCRIPT"
@@ -254,6 +254,17 @@ cleanup_legacy_marketplace_runtime() {
 }
 
 cleanup_legacy_marketplace_runtime
+
+sync_plugin_runtime() {
+  rm -rf "$PLUGIN_ROOT/src" "$PLUGIN_ROOT/package.json" "$PLUGIN_ROOT/package-lock.json"
+  cp -R "$REPO_ROOT/src" "$PLUGIN_ROOT/src"
+  cp "$REPO_ROOT/package.json" "$PLUGIN_ROOT/package.json"
+  if [[ -f "$REPO_ROOT/package-lock.json" ]]; then
+    cp "$REPO_ROOT/package-lock.json" "$PLUGIN_ROOT/package-lock.json"
+  fi
+}
+
+sync_plugin_runtime
 
 cat > "$MARKETPLACE_ROOT/.agents/plugins/marketplace.json" <<JSON
 {
@@ -329,11 +340,6 @@ sync_plugin_cache() {
   rm -rf "$CACHE_PLUGIN_ROOT"
   mkdir -p "$CACHE_PLUGIN_ROOT"
   cp -R "$PLUGIN_ROOT/." "$CACHE_PLUGIN_ROOT/"
-  cp -R "$REPO_ROOT/src" "$CACHE_PLUGIN_ROOT/src"
-  cp "$REPO_ROOT/package.json" "$CACHE_PLUGIN_ROOT/package.json"
-  if [[ -f "$REPO_ROOT/package-lock.json" ]]; then
-    cp "$REPO_ROOT/package-lock.json" "$CACHE_PLUGIN_ROOT/package-lock.json"
-  fi
   log "updated plugin cache: $CACHE_PLUGIN_ROOT"
 }
 
@@ -528,6 +534,8 @@ If Codex still does not load the plugin after restart, run this to refresh the c
   codex plugin add "$PLUGIN_NAME@$MARKETPLACE_NAME"
 EOF
 fi
+
+sync_plugin_cache
 
 cat <<EOF
 

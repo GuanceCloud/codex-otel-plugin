@@ -7,7 +7,7 @@ CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$CODEX_HOME/config.toml}"
 CONFIG_FILE="${GTRACE_CONFIG_FILE:-$CODEX_HOME/gtrace.json}"
 MARKETPLACE_NAME="${MARKETPLACE_NAME:-codex-otel-plugin}"
 PLUGIN_NAME="${PLUGIN_NAME:-tracing}"
-MARKETPLACE_ROOT="${MARKETPLACE_ROOT:-$CODEX_HOME/$MARKETPLACE_NAME}"
+MARKETPLACE_ROOT="${MARKETPLACE_ROOT:-$CODEX_HOME/plugin-sources/$MARKETPLACE_NAME}"
 PLUGIN_ROOT="$MARKETPLACE_ROOT/plugins/$PLUGIN_NAME"
 REFRESH=false
 WRITE_CONFIG=1
@@ -437,6 +437,27 @@ const debug = process.env.GTRACE_DEBUG_RUNTIME !== "false";
 const tags = JSON.parse(process.env.GTRACE_TAGS_RUNTIME || "[]");
 const extraHeaders = JSON.parse(process.env.GTRACE_HEADERS_RUNTIME || "[]");
 
+function canonicalHeaderName(key) {
+  const normalized = String(key).trim().toLowerCase().replace(/_/g, "-");
+  if (!normalized) return "";
+  if (normalized === "to-headless") return "To-Headless";
+  if (normalized === "x-token") return "X-Token";
+  if (normalized === "authorization") return "Authorization";
+  return String(key).trim();
+}
+
+function normalizeHeaders(headers) {
+  const next = {};
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) return next;
+  for (const [key, value] of Object.entries(headers)) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    const canonicalKey = canonicalHeaderName(key);
+    if (!canonicalKey) continue;
+    next[canonicalKey] = value.trim();
+  }
+  return next;
+}
+
 let config = {};
 if (fs.existsSync(configFile)) {
   const raw = fs.readFileSync(configFile, "utf8").trim();
@@ -447,9 +468,7 @@ config.enabled = true;
 if (endpoint) config.endpoint = endpoint;
 if (tracePath) config.tracePath = tracePath;
 config.debug = debug;
-config.headers = config.headers && typeof config.headers === "object" && !Array.isArray(config.headers)
-  ? config.headers
-  : {};
+config.headers = normalizeHeaders(config.headers);
 
 if (installType === "gtrace") {
   config.headers["To-Headless"] ??= "true";
@@ -460,7 +479,9 @@ if (xToken) {
 for (const header of extraHeaders) {
   const [key, ...rest] = String(header).split("=");
   if (!key || rest.length === 0) continue;
-  config.headers[key] = rest.join("=");
+  const canonicalKey = canonicalHeaderName(key);
+  if (!canonicalKey) continue;
+  config.headers[canonicalKey] = rest.join("=").trim();
 }
 if (Object.keys(config.headers).length === 0) {
   delete config.headers;
@@ -536,6 +557,25 @@ EOF
 fi
 
 sync_plugin_cache
+
+remove_obsolete_marketplace_roots() {
+  local candidate
+  for candidate in \
+    "$CODEX_HOME/codex-otel-plugin" \
+    "$CODEX_HOME/marketplaces/$MARKETPLACE_NAME"
+  do
+    if [[ "$candidate" == "$MARKETPLACE_ROOT" ]]; then
+      continue
+    fi
+    if [[ -e "$candidate" ]]; then
+      rm -rf "$candidate"
+      log "removed obsolete marketplace root: $candidate"
+    fi
+  done
+  rmdir "$CODEX_HOME/marketplaces" 2>/dev/null || true
+}
+
+remove_obsolete_marketplace_roots
 
 cat <<EOF
 

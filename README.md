@@ -69,7 +69,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 
 安装脚本会完成：
 
-- 创建本地 Codex marketplace：`~/.codex/codex-otel-plugin`
+- 创建本地 Codex marketplace：`~/.codex/plugin-sources/codex-otel-plugin`
 - 写入插件：`tracing@codex-otel-plugin`
 - 写入 Stop hook：`node ~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>/src/codex-hook-wrapper.js`
 - 写入 Codex 配置：`~/.codex/config.toml`
@@ -81,7 +81,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 ```toml
 [marketplaces.codex-otel-plugin]
 source_type = "local"
-source = "/home/<user>/.codex/codex-otel-plugin"
+source = "/home/<user>/.codex/plugin-sources/codex-otel-plugin"
 
 [plugins."tracing@codex-otel-plugin"]
 enabled = true
@@ -128,6 +128,32 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
   | bash -s -- v0.1.0
 ```
+
+## 卸载
+
+只卸载插件：
+
+```bash
+codex plugin remove tracing@codex-otel-plugin
+```
+
+彻底清理本地 source、cache 和上报配置：
+
+```bash
+codex plugin remove tracing@codex-otel-plugin
+codex plugin marketplace remove codex-otel-plugin
+rm -rf ~/.codex/plugin-sources/codex-otel-plugin
+rm -rf ~/.codex/plugins/cache/codex-otel-plugin
+rm -f ~/.codex/gtrace.json
+```
+
+如果只想停用插件但保留安装文件，也可以只执行：
+
+```bash
+codex plugin remove tracing@codex-otel-plugin
+```
+
+不要先手工删除 `~/.codex/plugin-sources/codex-otel-plugin`，再执行 `codex plugin list` 或 `codex plugin marketplace list`。如果 marketplace 配置还在，而 source 目录已经被手工删掉，Codex 会报 marketplace manifest 缺失。
 
 安装参数：
 

@@ -201,6 +201,15 @@ function buildGenerationOutput(step, maxChars) {
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
+function toolCommand(tc) {
+  const args = tc.args;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const command = args.cmd ?? args.command;
+  if (Array.isArray(command)) return command.map((part) => String(part)).join(" ");
+  if (typeof command === "string") return command;
+  return undefined;
+}
+
 function assistantMessagesFromStep(step) {
   if (Array.isArray(step.assistantMessages) && step.assistantMessages.length > 0) {
     return step.assistantMessages.filter((message) => preview(message.text, 1));
@@ -368,12 +377,15 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
 
     for (const tc of step.toolCalls) {
       const toolAttributes = commonAttributes(config, sessionMeta);
+      const command = toolCommand(tc);
       setAttr(toolAttributes, "run_id", turn.turnId);
       setAttr(toolAttributes, "run_ids", turn.turnId);
       setAttr(toolAttributes, "provider_name", sessionMeta.modelProvider);
       setAttr(toolAttributes, "model_name", turn.model);
       setAttr(toolAttributes, "tool_name", tc.name || "tool");
       setAttr(toolAttributes, "tool_call_id", tc.callId);
+      setAttr(toolAttributes, "tool_command", preview(command, maxChars));
+      setAttr(toolAttributes, "tool_target_command", preview(command, maxChars));
       setAttr(toolAttributes, "tool_args_preview", preview(tc.args, maxChars));
       setAttr(toolAttributes, "tool_result_preview", preview(toText(tc.output), maxChars));
       setAttr(toolAttributes, "tool_result_status", tc.error ? "error" : "completed");

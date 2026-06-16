@@ -172,6 +172,28 @@ export function parseSession(lines) {
     recordAssistantMessage(ensureStep(ts), text, ts, ts);
   }
 
+  function recordToolCall(ts, payload, rawArgs) {
+    const s = ensureStep(ts);
+    const callId = payload.call_id;
+    const existing = typeof callId === "string" ? toolCallsById.get(callId) : undefined;
+    if (existing) {
+      existing.startTime = Math.min(existing.startTime, ts);
+      if (!existing.name) existing.name = payload.name;
+      if (existing.args == null) existing.args = parseArgs(rawArgs);
+      return existing;
+    }
+
+    const tc = {
+      callId,
+      name: payload.name,
+      args: parseArgs(rawArgs),
+      startTime: ts,
+    };
+    s.toolCalls.push(tc);
+    if (typeof callId === "string") toolCallsById.set(callId, tc);
+    return tc;
+  }
+
   function inferCompleted(currentTurn) {
     return Boolean(
       currentTurn?.lastAgentMessage ||
@@ -240,25 +262,9 @@ export function parseSession(lines) {
           }
         }
       } else if (p.type === "function_call") {
-        const s = ensureStep(ts);
-        const tc = {
-          callId: p.call_id,
-          name: p.name,
-          args: parseArgs(p.arguments),
-          startTime: ts,
-        };
-        s.toolCalls.push(tc);
-        toolCallsById.set(tc.callId, tc);
+        recordToolCall(ts, p, p.arguments);
       } else if (p.type === "custom_tool_call") {
-        const s = ensureStep(ts);
-        const tc = {
-          callId: p.call_id,
-          name: p.name,
-          args: parseArgs(p.input),
-          startTime: ts,
-        };
-        s.toolCalls.push(tc);
-        toolCallsById.set(tc.callId, tc);
+        recordToolCall(ts, p, p.input);
       } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
         const tc = toolCallsById.get(p.call_id);
         if (tc) {

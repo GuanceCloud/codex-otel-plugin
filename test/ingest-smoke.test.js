@@ -233,6 +233,9 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     listed.data.map((span) => span.gtrace.observation.type).sort(),
     ["agent", "assistant", "llm", "llm", "tool"].sort(),
   );
+  const toolSpan = uploadedSpans.find((span) => span.name === "tool:exec_command");
+  assert.equal(attrValue(toolSpan.attributes, "tool_command"), "ls");
+  assert.equal(attrValue(toolSpan.attributes, "tool_target_command"), "ls");
   assert.equal(listed.data.at(-1).gtrace.trace.session_id, "sess-basic");
   assert.equal(
     listed.data.find((span) => span.gtrace.observation.type === "llm").gtrace.observation.model_name,
@@ -388,6 +391,53 @@ test("Codex parser collapses multiple assistant response items into one step out
   assert.equal(turns[0].steps[0].assistantMessages[0].startTime, Date.parse("2026-06-03T10:00:02.000Z"));
   assert.equal(turns[0].steps[0].assistantMessages[0].eventTime, Date.parse("2026-06-03T10:00:02.300Z"));
   assert.equal(turns[0].steps[0].assistantMessages[0].endTime, Date.parse("2026-06-03T10:00:02.300Z"));
+});
+
+test("Codex parser deduplicates repeated tool calls with the same call_id", () => {
+  const { turns } = parseSession([
+    row("2026-06-03T10:00:00.000Z", "session_meta", {
+      id: "sess-tool-dedupe",
+      cli_version: "0.140.0",
+      model_provider: "openai",
+    }),
+    row("2026-06-03T10:00:01.000Z", "event_msg", {
+      type: "task_started",
+      turn_id: "turn-tool-dedupe",
+    }),
+    row("2026-06-03T10:00:02.000Z", "response_item", {
+      type: "function_call",
+      name: "exec_command",
+      call_id: "call-duplicate",
+      arguments: JSON.stringify({ cmd: "npm test" }),
+    }),
+    row("2026-06-03T10:00:02.001Z", "response_item", {
+      type: "function_call",
+      name: "exec_command",
+      call_id: "call-duplicate",
+      arguments: JSON.stringify({ cmd: "npm test" }),
+    }),
+    row("2026-06-03T10:00:02.300Z", "response_item", {
+      type: "function_call_output",
+      call_id: "call-duplicate",
+      output: "ok",
+    }),
+    row("2026-06-03T10:00:02.500Z", "event_msg", {
+      type: "token_count",
+      info: {
+        last_token_usage: {
+          input_tokens: 10,
+          output_tokens: 3,
+          total_tokens: 13,
+        },
+      },
+    }),
+  ]);
+
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].steps[0].toolCalls.length, 1);
+  assert.equal(turns[0].steps[0].toolCalls[0].callId, "call-duplicate");
+  assert.deepEqual(turns[0].steps[0].toolCalls[0].args, { cmd: "npm test" });
+  assert.equal(turns[0].steps[0].toolCalls[0].endTime, Date.parse("2026-06-03T10:00:02.300Z"));
 });
 
 test("Codex collector skips blank turns that only contain startup context", async () => {

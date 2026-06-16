@@ -113,6 +113,7 @@ docs/traces.md
 - 模型调用 span name 是 `llm`
 - 助手消息 span name 是 `assistant`，parent 是对应的 `llm` span
 - 工具调用 span name 是 `tool:<name>`
+- 工具命令字段使用 `tool_command` / `tool_target_command`，从 `args.cmd` 或 `args.command` 提取
 - 字段使用扁平 canonical tag
 - 模型字段统一使用 `model_name`
 - 不再使用 `request_model` 和 `response_model`

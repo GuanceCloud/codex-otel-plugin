@@ -26,6 +26,6 @@ cp -R \
 tar -czf "$DIST_DIR/$ASSET_NAME" -C "$STAGE_DIR" .
 cp "$REPO_ROOT/scripts/install-release.sh" "$DIST_DIR/$INSTALLER_NAME"
 
-sha256sum "$DIST_DIR/$ASSET_NAME" "$DIST_DIR/$INSTALLER_NAME" > "$DIST_DIR/SHA256SUMS"
+(cd "$DIST_DIR" && sha256sum "$ASSET_NAME" "$INSTALLER_NAME" > SHA256SUMS)
 
 printf 'Built release assets in %s\n' "$DIST_DIR"

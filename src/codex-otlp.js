@@ -112,8 +112,9 @@ function codexSpansToOtlpRequest(spans = [], format = "json") {
   };
 }
 
-const DURATION_BOUNDS = [1, 5, 10, 50, 100, 500, 1000, 5000, 30000, 120000];
-const TOKEN_BOUNDS = [1, 10, 100, 1000, 10000, 100000, 1000000];
+const CLIENT_DURATION_BOUNDS = [0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92];
+const WORKFLOW_DURATION_BOUNDS = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200];
+const TOKEN_BOUNDS = [1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864];
 
 function metricKey(metric) {
   return JSON.stringify({
@@ -126,7 +127,8 @@ function metricKey(metric) {
 
 function metricBounds(metric) {
   if (metric.unit === "{token}") return TOKEN_BOUNDS;
-  if (metric.unit === "ms") return DURATION_BOUNDS;
+  if (metric.name === "gen_ai.workflow.duration") return WORKFLOW_DURATION_BOUNDS;
+  if (metric.unit === "s") return CLIENT_DURATION_BOUNDS;
   return [];
 }
 

@@ -74,15 +74,13 @@ Trace 字段、Span name、token 口径和 UI 展示建议见 [docs/traces.md](d
 
 Metrics 指标体系、tag 设计和 OTLP 形态见 [docs/metrics.md](docs/metrics.md)。
 
-当前 Metrics 只从当前 turn 的 spans 派生以下核心指标：
+当前 Metrics 只从当前 turn 的 spans 派生以下 OpenTelemetry GenAI 指标：
 
-- `gen_ai.agent.request.count`
-- `gen_ai.agent.request.duration`
-- `gen_ai.agent.operation.count`
-- `gen_ai.agent.operation.duration`
-- `gen_ai.agent.token.usage`
+- `gen_ai.workflow.duration`
+- `gen_ai.client.operation.duration`
+- `gen_ai.client.token.usage`
 
-Metrics 默认带 `session_id`，不带 `session_key` / `run_id`。全局筛选类 tag 建议通过 `resourceAttributes` 放在 OTLP `resource.attributes` 中，并由 trace 和 metrics 共用。
+Metrics 默认带 `gen_ai.conversation.id`，不带 `session_key` / `run_id`。全局筛选类 tag 建议通过 `resourceAttributes` 放在 OTLP `resource.attributes` 中，并由 trace 和 metrics 共用。旧字段到 GenAI 字段的变更关系见 [docs/traces.md](docs/traces.md) 和 [docs/metrics.md](docs/metrics.md)。
 
 ## 开发
 

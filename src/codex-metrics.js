@@ -1,45 +1,27 @@
 const TOKEN_ATTRIBUTE_TYPES = [
-  ["usage_input_tokens", "input"],
-  ["usage_output_tokens", "output"],
-  ["usage_total_tokens", "total"],
-  ["usage_cache_read_input_tokens", "cache_read"],
-  ["usage_cache_total_tokens", "cache_total"],
-  ["usage_reasoning_tokens", "reasoning"],
+  ["gen_ai.usage.input_tokens", "input"],
+  ["gen_ai.usage.output_tokens", "output"],
 ];
 
-const REQUEST_COUNT = {
-  name: "gen_ai.agent.request.count",
-  type: "sum",
-  unit: "1",
-  description: "Agent request count.",
-};
-
-const REQUEST_DURATION = {
-  name: "gen_ai.agent.request.duration",
+const WORKFLOW_DURATION = {
+  name: "gen_ai.workflow.duration",
   type: "histogram",
-  unit: "ms",
-  description: "Agent request duration.",
+  unit: "s",
+  description: "GenAI workflow duration.",
 };
 
 const TOKEN_USAGE = {
-  name: "gen_ai.agent.token.usage",
+  name: "gen_ai.client.token.usage",
   type: "histogram",
   unit: "{token}",
-  description: "Agent model token usage.",
-};
-
-const OPERATION_COUNT = {
-  name: "gen_ai.agent.operation.count",
-  type: "sum",
-  unit: "1",
-  description: "Agent operation count.",
+  description: "Number of input and output tokens used.",
 };
 
 const OPERATION_DURATION = {
-  name: "gen_ai.agent.operation.duration",
+  name: "gen_ai.client.operation.duration",
   type: "histogram",
-  unit: "ms",
-  description: "Agent operation duration.",
+  unit: "s",
+  description: "GenAI operation duration.",
 };
 
 function setAttr(attributes, key, value) {
@@ -52,11 +34,11 @@ function finitePositive(value) {
 
 function spanDuration(span) {
   const duration = finitePositive(span.duration_ms);
-  if (duration !== undefined) return duration;
+  if (duration !== undefined) return duration / 1000;
   try {
     const start = BigInt(span.start_time_unix_nano ?? 0);
     const end = BigInt(span.end_time_unix_nano ?? 0);
-    if (start > 0n && end > start) return Number(end - start) / 1_000_000;
+    if (start > 0n && end > start) return Number(end - start) / 1_000_000_000;
   } catch {
     return undefined;
   }
@@ -84,10 +66,12 @@ function operationOutcome(span) {
 
 function baseAttrs(span) {
   const attributes = {};
-  setAttr(attributes, "agent_runtime", span.resource?.agent_runtime ?? span.attributes?.agent_runtime ?? "codex");
-  setAttr(attributes, "session_id", span.attributes?.session_id);
-  setAttr(attributes, "provider_name", span.attributes?.provider_name);
-  setAttr(attributes, "model_name", span.attributes?.model_name);
+  setAttr(attributes, "gen_ai.conversation.id", span.attributes?.["gen_ai.conversation.id"]);
+  setAttr(attributes, "gen_ai.operation.name", span.attributes?.["gen_ai.operation.name"]);
+  setAttr(attributes, "gen_ai.provider.name", span.attributes?.["gen_ai.provider.name"]);
+  setAttr(attributes, "gen_ai.request.model", span.attributes?.["gen_ai.request.model"]);
+  setAttr(attributes, "gen_ai.response.model", span.attributes?.["gen_ai.response.model"]);
+  setAttr(attributes, "error.type", span.attributes?.["error.type"]);
   return attributes;
 }
 
@@ -105,25 +89,21 @@ function metric(meta, span, value, attributes) {
 
 function requestMetrics(span) {
   const attributes = {
-    ...baseAttrs(span),
-    outcome: requestOutcome(span),
+    "gen_ai.conversation.id": span.attributes?.["gen_ai.conversation.id"],
+    "error.type": span.attributes?.["error.type"],
   };
-  setAttr(attributes, "session_agent", span.attributes?.session_agent);
-  setAttr(attributes, "final_status", span.attributes?.final_status);
+  setAttr(attributes, "final_status", requestOutcome(span));
 
-  const out = [metric(REQUEST_COUNT, span, 1, attributes)];
   const duration = spanDuration(span);
-  if (duration !== undefined) out.push(metric(REQUEST_DURATION, span, duration, attributes));
-  return out;
+  return duration === undefined ? [] : [metric(WORKFLOW_DURATION, span, duration, attributes)];
 }
 
 function llmMetrics(span) {
   const operationAttributes = {
     ...baseAttrs(span),
-    operation_name: "model",
-    outcome: operationOutcome(span),
   };
-  const out = [metric(OPERATION_COUNT, span, 1, operationAttributes)];
+  if (operationOutcome(span) === "error") setAttr(operationAttributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
+  const out = [];
   const duration = spanDuration(span);
   if (duration !== undefined) out.push(metric(OPERATION_DURATION, span, duration, operationAttributes));
 
@@ -133,8 +113,7 @@ function llmMetrics(span) {
     out.push(
       metric(TOKEN_USAGE, span, value, {
         ...baseAttrs(span),
-        outcome: operationOutcome(span),
-        token_type: tokenType,
+        "gen_ai.token.type": tokenType,
       }),
     );
   }
@@ -144,16 +123,13 @@ function llmMetrics(span) {
 function toolMetrics(span) {
   const attributes = {
     ...baseAttrs(span),
-    operation_name: "tool",
-    outcome: operationOutcome(span),
   };
-  setAttr(attributes, "tool_name", span.attributes?.tool_name ?? String(span.name ?? "").replace(/^tool:/, ""));
+  if (operationOutcome(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
+  setAttr(attributes, "gen_ai.tool.name", span.attributes?.["gen_ai.tool.name"] ?? String(span.name ?? "").replace(/^tool:/, ""));
   setAttr(attributes, "tool_result_status", span.attributes?.tool_result_status);
 
-  const out = [metric(OPERATION_COUNT, span, 1, attributes)];
   const duration = spanDuration(span);
-  if (duration !== undefined) out.push(metric(OPERATION_DURATION, span, duration, attributes));
-  return out;
+  return duration === undefined ? [] : [metric(OPERATION_DURATION, span, duration, attributes)];
 }
 
 export function buildCodexMetrics(spans = []) {

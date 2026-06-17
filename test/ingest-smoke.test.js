@@ -63,7 +63,6 @@ test("accepts canonical OTLP trace protobuf and stores normalized Codex spans", 
     output: 20,
     total: 30,
     cache_read_input_tokens: 2,
-    cache_total_tokens: 4,
     reasoning_tokens: 3,
   });
   assert.equal(lines[2].attributes.reason, "command failed");
@@ -94,8 +93,9 @@ test("accepts OTLP trace JSON used by @opentelemetry/exporter-trace-otlp-http", 
                   startTimeUnixNano: "1800000000000000000",
                   endTimeUnixNano: "1800000000100000000",
                   attributes: [
-                    attr("session_id", "codex-json-session"),
-                    attr("model_name", "gpt-json"),
+                    attr("gen_ai.conversation.id", "codex-json-session"),
+                    attr("gen_ai.request.model", "gpt-json"),
+                    attr("gen_ai.response.model", "gpt-json"),
                   ],
                   status: { code: 0 },
                 },
@@ -194,16 +194,34 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("request_model"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("response_model"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("session_key"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("session_id"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("session_agent"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("provider_name"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("model_name"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("usage_input_tokens"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("usage_output_tokens"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("usage_total_tokens"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("tool_name"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("tool_call_id"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("tool_args_preview"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("tool_result_preview"), false);
   assert.equal(uploadedSpans[0].name, "agent_run");
   assert.equal(uploadedSpans[1].name, "llm");
   assert.equal(
-    attrValue(uploadedSpans[0].attributes, "model_name"),
+    attrValue(uploadedSpans[0].attributes, "gen_ai.request.model"),
     "gpt-5.4",
   );
   assert.equal(
-    attrValue(uploadedSpans[0].attributes, "provider_name"),
+    attrValue(uploadedSpans[0].attributes, "gen_ai.response.model"),
+    "gpt-5.4",
+  );
+  assert.equal(
+    attrValue(uploadedSpans[0].attributes, "gen_ai.provider.name"),
     "openai",
   );
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.conversation.id"), "sess-basic");
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.agent.name"), "codex");
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.operation.name"), "invoke_agent");
   assert.equal(
     attrValue(uploadedSpans[0].attributes, "final_status"),
     "completed",
@@ -212,28 +230,21 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(agentRun.attributes, "session_create_at"), "2026-06-03T09:59:58.000Z");
   assert.equal(attrValue(agentRun.attributes, "session_updated_at"), "2026-06-03T10:00:04.400Z");
   assert.equal(attrValue(agentRun.attributes, "session_channel"), "cli");
-  assert.equal(attrValue(agentRun.attributes, "usage_input_tokens"), 200);
-  assert.equal(attrValue(agentRun.attributes, "usage_cache_read_input_tokens"), 50);
-  assert.equal(attrValue(agentRun.attributes, "usage_cache_total_tokens"), 50);
-  assert.equal(attrValue(agentRun.attributes, "usage_output_tokens"), 50);
-  assert.equal(attrValue(agentRun.attributes, "usage_total_tokens"), 250);
-  assert.equal(attrValue(agentRun.attributes, "usage_context_input_tokens"), 150);
-  assert.equal(attrValue(agentRun.attributes, "usage_context_total_tokens"), 180);
-  assert.equal(attrValue(agentRun.attributes, "usage_reasoning_tokens"), 5);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.input_tokens"), 250);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.cache_read.input_tokens"), 50);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.output_tokens"), 50);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.reasoning.output_tokens"), 5);
 
   const llmSpans = uploadedSpans.filter((span) => span.name === "llm");
   assert.ok(llmSpans.every((span) => spanEndNs(span) > spanStartNs(span)));
   assert.ok(llmSpans.every((span) => attrValue(span.attributes, "session_key") === undefined));
+  assert.ok(llmSpans.every((span) => attrValue(span.attributes, "gen_ai.operation.name") === "chat"));
   const cachedLlm = llmSpans.find(
-    (span) => attrValue(span.attributes, "usage_context_total_tokens") === 180,
+    (span) => attrValue(span.attributes, "gen_ai.usage.cache_read.input_tokens") === 50,
   );
-  assert.equal(attrValue(cachedLlm.attributes, "usage_input_tokens"), 100);
-  assert.equal(attrValue(cachedLlm.attributes, "usage_cache_read_input_tokens"), 50);
-  assert.equal(attrValue(cachedLlm.attributes, "usage_cache_total_tokens"), 50);
-  assert.equal(attrValue(cachedLlm.attributes, "usage_output_tokens"), 30);
-  assert.equal(attrValue(cachedLlm.attributes, "usage_total_tokens"), 130);
-  assert.equal(attrValue(cachedLlm.attributes, "usage_context_input_tokens"), 150);
-  assert.equal(attrValue(cachedLlm.attributes, "usage_context_total_tokens"), 180);
+  assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.input_tokens"), 150);
+  assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.cache_read.input_tokens"), 50);
+  assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.output_tokens"), 30);
 
   const assistantSpan = uploadedSpans.find((span) => span.name === "assistant");
   assert.equal(attrValue(assistantSpan.attributes, "role"), "assistant");
@@ -257,6 +268,11 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   );
   const toolSpan = uploadedSpans.find((span) => span.name === "tool:exec_command");
   assert.equal(attrValue(toolSpan.attributes, "tool_command"), "ls");
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.operation.name"), "execute_tool");
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.name"), "exec_command");
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.id"), "call-1");
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.arguments"), '{"command":["ls"]}');
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.result"), "file1.txt file2.txt");
   assert.ok(spanEndNs(toolSpan) <= spanEndNs(cachedLlm));
   assert.equal(listed.data.at(-1).gtrace.trace.session_id, "sess-basic");
   assert.equal(
@@ -275,40 +291,45 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(metricResourceAttrs, "app_id"), "codex-monitor");
   assert.equal(attrValue(metricResourceAttrs, "app_name"), "Codex OTEL");
   assert.equal(metricsBatch.metrics[0].resource.app_id, "codex-monitor");
-  assert.equal(metricsBatch.metric_count, 17);
+  assert.equal(metricsBatch.metric_count, 8);
   assert.deepEqual(
     Array.from(new Set(metricsBatch.metrics.map((metric) => metric.name))).sort(),
     [
-      "gen_ai.agent.operation.count",
-      "gen_ai.agent.operation.duration",
-      "gen_ai.agent.request.count",
-      "gen_ai.agent.request.duration",
-      "gen_ai.agent.token.usage",
+      "gen_ai.client.operation.duration",
+      "gen_ai.client.token.usage",
+      "gen_ai.workflow.duration",
     ],
   );
-  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_id === "sess-basic"));
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes["gen_ai.conversation.id"] === "sess-basic"));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_key === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.run_id === undefined));
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_id === undefined));
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.operation_name === undefined));
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.token_type === undefined));
   assert.deepEqual(
     Array.from(
       new Set(
         metricsBatch.metrics
-          .filter((metric) => metric.name === "gen_ai.agent.token.usage")
-          .map((metric) => metric.attributes.token_type),
+          .filter((metric) => metric.name === "gen_ai.client.token.usage")
+          .map((metric) => metric.attributes["gen_ai.token.type"]),
       ),
     ).sort(),
-    ["cache_read", "cache_total", "input", "output", "reasoning", "total"],
+    ["input", "output"],
   );
+  const workflowDuration = metricsBatch.metrics.find((metric) => metric.name === "gen_ai.workflow.duration");
+  assert.equal(workflowDuration.unit, "s");
+  assert.equal(workflowDuration.sum, 3.4);
   const toolOperation = metricsBatch.metrics.find(
     (metric) =>
-      metric.name === "gen_ai.agent.operation.count" &&
-      metric.attributes.operation_name === "tool",
+      metric.name === "gen_ai.client.operation.duration" &&
+      metric.attributes["gen_ai.operation.name"] === "execute_tool",
   );
-  assert.equal(toolOperation.attributes.tool_name, "exec_command");
+  assert.equal(toolOperation.unit, "s");
+  assert.equal(toolOperation.attributes["gen_ai.tool.name"], "exec_command");
   assert.equal(toolOperation.attributes.tool_result_status, "completed");
 
   const listedMetrics = await fetch(`${baseUrl}/metrics?limit=20`).then((res) => res.json());
-  assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.agent.token.usage"));
+  assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.client.token.usage"));
 });
 
 test("Codex parser infers completed status when Stop hook runs before task_complete is written", () => {
@@ -641,7 +662,7 @@ function buildTracePayload() {
                 end: now + 100_000_000n,
                 attributes: [
                   attr("trace_name", "Codex Turn"),
-                  attr("session_id", "codex-session-1"),
+                  attr("gen_ai.conversation.id", "codex-session-1"),
                   attr("user.id", "user@example.com"),
                   attr("span_type", "agent"),
                   attr("input_preview", "hello"),
@@ -658,13 +679,12 @@ function buildTracePayload() {
                 end: now + 60_000_000n,
                 attributes: [
                   attr("span_type", "llm"),
-                  attr("model_name", "gpt-test"),
-                  attr("usage_input_tokens", 10),
-                  attr("usage_output_tokens", 20),
-                  attr("usage_total_tokens", 30),
-                  attr("usage_cache_read_input_tokens", 2),
-                  attr("usage_cache_total_tokens", 4),
-                  attr("usage_reasoning_tokens", 3),
+                  attr("gen_ai.request.model", "gpt-test"),
+                  attr("gen_ai.response.model", "gpt-test"),
+                  attr("gen_ai.usage.input_tokens", 10),
+                  attr("gen_ai.usage.output_tokens", 20),
+                  attr("gen_ai.usage.cache_read.input_tokens", 2),
+                  attr("gen_ai.usage.reasoning.output_tokens", 3),
                 ],
               }),
               span({

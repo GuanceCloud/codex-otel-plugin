@@ -196,7 +196,7 @@ function extractGtrace(attributes, spanName) {
   return {
     trace: {
       name: attributes["gtrace.trace.name"] ?? attributes.trace_name,
-      session_id: attributes["gtrace.session.id"] ?? attributes.session_id,
+      session_id: attributes["gtrace.session.id"] ?? attributes["gen_ai.conversation.id"] ?? attributes.session_id,
       user_id: attributes["gtrace.user.id"] ?? attributes.user_id,
       metadata: collectPrefixed(attributes, "gtrace.trace.metadata."),
     },
@@ -204,7 +204,12 @@ function extractGtrace(attributes, spanName) {
       type: attributes["gtrace.observation.type"] ?? attributes.span_type ?? observationTypeFromSpanName(spanName),
       input: parseMaybeJson(attributes["gtrace.observation.input"] ?? attributes.input_preview),
       output: parseMaybeJson(attributes["gtrace.observation.output"] ?? attributes.output_preview),
-      model_name: attributes["gtrace.model.name"] ?? attributes.model_name ?? attributes.request_model,
+      model_name:
+        attributes["gtrace.model.name"] ??
+        attributes["gen_ai.response.model"] ??
+        attributes["gen_ai.request.model"] ??
+        attributes.model_name ??
+        attributes.request_model,
       usage: parseMaybeJson(attributes["gtrace.usage"]) ?? usageFromCanonicalAttributes(attributes),
     },
     environment: attributes["gtrace.environment"],
@@ -221,9 +226,19 @@ function observationTypeFromSpanName(spanName) {
 
 function usageFromCanonicalAttributes(attributes) {
   const usage = {};
-  if (typeof attributes.usage_input_tokens === "number") usage.input = attributes.usage_input_tokens;
-  if (typeof attributes.usage_output_tokens === "number") usage.output = attributes.usage_output_tokens;
-  if (typeof attributes.usage_total_tokens === "number") usage.total = attributes.usage_total_tokens;
+  const inputTokens = attributes["gen_ai.usage.input_tokens"] ?? attributes.usage_input_tokens;
+  const outputTokens = attributes["gen_ai.usage.output_tokens"] ?? attributes.usage_output_tokens;
+  if (typeof inputTokens === "number") usage.input = inputTokens;
+  if (typeof outputTokens === "number") usage.output = outputTokens;
+  if (typeof attributes.usage_total_tokens === "number") {
+    usage.total = attributes.usage_total_tokens;
+  } else if (typeof usage.input === "number" || typeof usage.output === "number") {
+    usage.total = (usage.input ?? 0) + (usage.output ?? 0);
+  }
+  const cacheReadInputTokens = attributes["gen_ai.usage.cache_read.input_tokens"] ?? attributes.usage_cache_read_input_tokens;
+  if (typeof cacheReadInputTokens === "number") {
+    usage.cache_read_input_tokens = cacheReadInputTokens;
+  }
   if (typeof attributes.usage_cache_read_input_tokens === "number") {
     usage.cache_read_input_tokens = attributes.usage_cache_read_input_tokens;
   }
@@ -232,7 +247,8 @@ function usageFromCanonicalAttributes(attributes) {
   }
   if (typeof attributes.usage_context_input_tokens === "number") usage.context_input_tokens = attributes.usage_context_input_tokens;
   if (typeof attributes.usage_context_total_tokens === "number") usage.context_total_tokens = attributes.usage_context_total_tokens;
-  if (typeof attributes.usage_reasoning_tokens === "number") usage.reasoning_tokens = attributes.usage_reasoning_tokens;
+  const reasoningTokens = attributes["gen_ai.usage.reasoning.output_tokens"] ?? attributes.usage_reasoning_tokens;
+  if (typeof reasoningTokens === "number") usage.reasoning_tokens = reasoningTokens;
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 

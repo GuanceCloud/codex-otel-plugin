@@ -7,6 +7,25 @@ import { loadRollout, parseSession } from "./codex-parse.js";
 import { loadUploadedTurnIds } from "./codex-sidecar.js";
 import { clipValue, toText } from "./codex-utils.js";
 
+const ATTR = {
+  agentName: "gen_ai.agent.name",
+  agentVersion: "gen_ai.agent.version",
+  conversationId: "gen_ai.conversation.id",
+  operationName: "gen_ai.operation.name",
+  outputType: "gen_ai.output.type",
+  providerName: "gen_ai.provider.name",
+  requestModel: "gen_ai.request.model",
+  responseModel: "gen_ai.response.model",
+  toolCallArguments: "gen_ai.tool.call.arguments",
+  toolCallId: "gen_ai.tool.call.id",
+  toolCallResult: "gen_ai.tool.call.result",
+  toolName: "gen_ai.tool.name",
+  usageCacheReadInputTokens: "gen_ai.usage.cache_read.input_tokens",
+  usageInputTokens: "gen_ai.usage.input_tokens",
+  usageOutputTokens: "gen_ai.usage.output_tokens",
+  usageReasoningOutputTokens: "gen_ai.usage.reasoning.output_tokens",
+};
+
 function randomTraceId() {
   return crypto.randomBytes(16).toString("hex");
 }
@@ -29,19 +48,10 @@ function usageDetails(usage) {
   const input = typeof usage.input_tokens === "number" ? usage.input_tokens : undefined;
   const output = typeof usage.output_tokens === "number" ? usage.output_tokens : undefined;
   const cacheRead = typeof usage.cached_input_tokens === "number" ? usage.cached_input_tokens : undefined;
-  const uncachedInput = input === undefined ? undefined : Math.max(0, input - (cacheRead ?? 0));
-  if (typeof uncachedInput === "number") details.input = uncachedInput;
+  if (typeof input === "number") details.input = input;
   if (typeof output === "number") details.output = output;
-  if (typeof uncachedInput === "number" || typeof output === "number") {
-    details.total = (uncachedInput ?? 0) + (output ?? 0);
-  }
-  if (typeof cacheRead === "number") {
-    details.cache_read_input_tokens = cacheRead;
-    details.cache_total_tokens = cacheRead;
-  }
-  if (typeof input === "number") details.context_input_tokens = input;
-  if (typeof usage.total_tokens === "number") details.context_total_tokens = usage.total_tokens;
-  if (typeof usage.reasoning_output_tokens === "number") details.reasoning_tokens = usage.reasoning_output_tokens;
+  if (typeof cacheRead === "number") details.cache_read_input_tokens = cacheRead;
+  if (typeof usage.reasoning_output_tokens === "number") details.reasoning_output_tokens = usage.reasoning_output_tokens;
   return Object.keys(details).length > 0 ? details : undefined;
 }
 
@@ -55,23 +65,12 @@ function aggregateUsageDetails(steps) {
 
     if (typeof usage.input === "number") aggregate.input = (aggregate.input ?? 0) + usage.input;
     if (typeof usage.output === "number") aggregate.output = (aggregate.output ?? 0) + usage.output;
-    if (typeof usage.total === "number") aggregate.total = (aggregate.total ?? 0) + usage.total;
     if (typeof usage.cache_read_input_tokens === "number") {
       aggregate.cache_read_input_tokens =
         (aggregate.cache_read_input_tokens ?? 0) + usage.cache_read_input_tokens;
     }
-    if (typeof usage.cache_total_tokens === "number") {
-      aggregate.cache_total_tokens = (aggregate.cache_total_tokens ?? 0) + usage.cache_total_tokens;
-    }
-    if (typeof usage.reasoning_tokens === "number") {
-      aggregate.reasoning_tokens = (aggregate.reasoning_tokens ?? 0) + usage.reasoning_tokens;
-    }
-
-    if (typeof usage.context_input_tokens === "number") {
-      aggregate.context_input_tokens = usage.context_input_tokens;
-    }
-    if (typeof usage.context_total_tokens === "number") {
-      aggregate.context_total_tokens = usage.context_total_tokens;
+    if (typeof usage.reasoning_output_tokens === "number") {
+      aggregate.reasoning_output_tokens = (aggregate.reasoning_output_tokens ?? 0) + usage.reasoning_output_tokens;
     }
   }
   return hasUsage ? aggregate : undefined;
@@ -119,6 +118,18 @@ function setAttr(attributes, key, value) {
   if (value !== undefined && value !== null) attributes[key] = value;
 }
 
+function setModelAttrs(attributes, model) {
+  setAttr(attributes, ATTR.requestModel, model);
+  setAttr(attributes, ATTR.responseModel, model);
+}
+
+function setUsageAttrs(attributes, usage) {
+  setAttr(attributes, ATTR.usageInputTokens, usage?.input);
+  setAttr(attributes, ATTR.usageOutputTokens, usage?.output);
+  setAttr(attributes, ATTR.usageCacheReadInputTokens, usage?.cache_read_input_tokens);
+  setAttr(attributes, ATTR.usageReasoningOutputTokens, usage?.reasoning_output_tokens);
+}
+
 function flattenMetadata(attributes, prefix, metadata = {}) {
   for (const [key, value] of Object.entries(metadata)) setAttr(attributes, `${prefix}.${key}`, value);
 }
@@ -161,12 +172,12 @@ function extractGtrace(attributes, spanName) {
   return {
     trace: {
       name: attributes.trace_name,
-      session_id: attributes.session_id,
+      session_id: attributes[ATTR.conversationId],
       user_id: attributes.user_id,
     },
     observation: {
       type: observationTypeFromSpanName(spanName),
-      model_name: attributes.model_name,
+      model_name: attributes[ATTR.responseModel] ?? attributes[ATTR.requestModel],
       usage: usageFromAttributes(attributes),
     },
   };
@@ -182,18 +193,17 @@ function observationTypeFromSpanName(spanName) {
 
 function usageFromAttributes(attributes) {
   const usage = {};
-  if (typeof attributes.usage_input_tokens === "number") usage.input = attributes.usage_input_tokens;
-  if (typeof attributes.usage_output_tokens === "number") usage.output = attributes.usage_output_tokens;
-  if (typeof attributes.usage_total_tokens === "number") usage.total = attributes.usage_total_tokens;
-  if (typeof attributes.usage_cache_read_input_tokens === "number") {
-    usage.cache_read_input_tokens = attributes.usage_cache_read_input_tokens;
+  if (typeof attributes[ATTR.usageInputTokens] === "number") usage.input = attributes[ATTR.usageInputTokens];
+  if (typeof attributes[ATTR.usageOutputTokens] === "number") usage.output = attributes[ATTR.usageOutputTokens];
+  if (typeof usage.input === "number" || typeof usage.output === "number") {
+    usage.total = (usage.input ?? 0) + (usage.output ?? 0);
   }
-  if (typeof attributes.usage_cache_total_tokens === "number") {
-    usage.cache_total_tokens = attributes.usage_cache_total_tokens;
+  if (typeof attributes[ATTR.usageCacheReadInputTokens] === "number") {
+    usage.cache_read_input_tokens = attributes[ATTR.usageCacheReadInputTokens];
   }
-  if (typeof attributes.usage_context_input_tokens === "number") usage.context_input_tokens = attributes.usage_context_input_tokens;
-  if (typeof attributes.usage_context_total_tokens === "number") usage.context_total_tokens = attributes.usage_context_total_tokens;
-  if (typeof attributes.usage_reasoning_tokens === "number") usage.reasoning_tokens = attributes.usage_reasoning_tokens;
+  if (typeof attributes[ATTR.usageReasoningOutputTokens] === "number") {
+    usage.reasoning_tokens = attributes[ATTR.usageReasoningOutputTokens];
+  }
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
@@ -238,8 +248,8 @@ function latestStepChildEndTime(step) {
 
 function commonAttributes(config, sessionMeta) {
   const attributes = {
-    session_id: sessionMeta.sessionId,
-    session_agent: "codex",
+    [ATTR.agentName]: "codex",
+    [ATTR.conversationId]: sessionMeta.sessionId,
     request_type: "user_request",
     is_internal_request: false,
   };
@@ -256,7 +266,7 @@ function resourceAttributes(config, sessionMeta) {
     "telemetry.sdk.version": "0.1.0",
     host: os.hostname(),
     agent_runtime: "codex",
-    agent_version: sessionMeta.cliVersion,
+    [ATTR.agentVersion]: sessionMeta.cliVersion,
     runtime_environment: config.environment,
   };
   for (const [key, value] of Object.entries(config.resourceAttributes ?? {})) setAttr(resource, key, value);
@@ -279,8 +289,9 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   const rootUsage = aggregateUsageDetails(turn.steps);
   setAttr(rootAttributes, "run_id", turn.turnId);
   setAttr(rootAttributes, "run_ids", turn.turnId);
-  setAttr(rootAttributes, "provider_name", sessionMeta.modelProvider);
-  setAttr(rootAttributes, "model_name", turn.model);
+  setAttr(rootAttributes, ATTR.operationName, "invoke_agent");
+  setAttr(rootAttributes, ATTR.providerName, sessionMeta.modelProvider);
+  setModelAttrs(rootAttributes, turn.model);
   setAttr(rootAttributes, "session_create_at", sessionMeta.createdAt);
   setAttr(rootAttributes, "session_updated_at", isoFromMs(turn.endTime));
   setAttr(rootAttributes, "session_channel", sessionMeta.channel);
@@ -289,17 +300,11 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   setAttr(rootAttributes, "output_preview", preview(turn.finalOutput, maxChars));
   setAttr(rootAttributes, "output_length", turn.finalOutput?.length);
   setAttr(rootAttributes, "tool_count", turn.steps.reduce((n, s) => n + s.toolCalls.length, 0));
-  setAttr(rootAttributes, "usage_input_tokens", rootUsage?.input);
-  setAttr(rootAttributes, "usage_output_tokens", rootUsage?.output);
-  setAttr(rootAttributes, "usage_total_tokens", rootUsage?.total);
-  setAttr(rootAttributes, "usage_cache_read_input_tokens", rootUsage?.cache_read_input_tokens);
-  setAttr(rootAttributes, "usage_cache_total_tokens", rootUsage?.cache_total_tokens);
-  setAttr(rootAttributes, "usage_context_input_tokens", rootUsage?.context_input_tokens);
-  setAttr(rootAttributes, "usage_context_total_tokens", rootUsage?.context_total_tokens);
-  setAttr(rootAttributes, "usage_reasoning_tokens", rootUsage?.reasoning_tokens);
+  setUsageAttrs(rootAttributes, rootUsage);
   setAttr(rootAttributes, "final_status", statusFromTurn(turn));
   setAttr(rootAttributes, "status", turn.aborted ? "error" : "ok");
   setAttr(rootAttributes, "reason", turn.aborted ? "Turn interrupted by user" : undefined);
+  setAttr(rootAttributes, "error.type", turn.aborted ? "_OTHER" : undefined);
 
   const spans = [
     makeSpan({
@@ -327,21 +332,16 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     const attributes = commonAttributes(config, sessionMeta);
     setAttr(attributes, "run_id", turn.turnId);
     setAttr(attributes, "run_ids", turn.turnId);
-    setAttr(attributes, "provider_name", sessionMeta.modelProvider);
-    setAttr(attributes, "model_name", turn.model);
+    setAttr(attributes, ATTR.operationName, "chat");
+    setAttr(attributes, ATTR.providerName, sessionMeta.modelProvider);
+    setModelAttrs(attributes, turn.model);
     setAttr(attributes, "input_preview", preview(generationInput, maxChars));
     setAttr(attributes, "input_length", preview(generationInput, maxChars)?.length);
     setAttr(attributes, "output_preview", preview(generationOutput, maxChars));
     setAttr(attributes, "output_length", preview(generationOutput, maxChars)?.length);
     setAttr(attributes, "output_kind", step.toolCalls.length > 0 ? "tool_call" : "text");
-    setAttr(attributes, "usage_input_tokens", usage?.input);
-    setAttr(attributes, "usage_output_tokens", usage?.output);
-    setAttr(attributes, "usage_total_tokens", usage?.total);
-    setAttr(attributes, "usage_cache_read_input_tokens", usage?.cache_read_input_tokens);
-    setAttr(attributes, "usage_cache_total_tokens", usage?.cache_total_tokens);
-    setAttr(attributes, "usage_context_input_tokens", usage?.context_input_tokens);
-    setAttr(attributes, "usage_context_total_tokens", usage?.context_total_tokens);
-    setAttr(attributes, "usage_reasoning_tokens", usage?.reasoning_tokens);
+    setAttr(attributes, ATTR.outputType, "text");
+    setUsageAttrs(attributes, usage);
     setAttr(attributes, "step_index", index);
     setAttr(attributes, "status", "ok");
 
@@ -369,8 +369,8 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       const assistantAttributes = commonAttributes(config, sessionMeta);
       setAttr(assistantAttributes, "run_id", turn.turnId);
       setAttr(assistantAttributes, "run_ids", turn.turnId);
-      setAttr(assistantAttributes, "provider_name", sessionMeta.modelProvider);
-      setAttr(assistantAttributes, "model_name", turn.model);
+      setAttr(assistantAttributes, ATTR.providerName, sessionMeta.modelProvider);
+      setModelAttrs(assistantAttributes, turn.model);
       setAttr(assistantAttributes, "role", "assistant");
       setAttr(assistantAttributes, "output_preview", preview(message.text, maxChars));
       setAttr(assistantAttributes, "output_length", message.text?.length);
@@ -406,16 +406,18 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       const command = toolCommand(tc);
       setAttr(toolAttributes, "run_id", turn.turnId);
       setAttr(toolAttributes, "run_ids", turn.turnId);
-      setAttr(toolAttributes, "provider_name", sessionMeta.modelProvider);
-      setAttr(toolAttributes, "model_name", turn.model);
-      setAttr(toolAttributes, "tool_name", tc.name || "tool");
-      setAttr(toolAttributes, "tool_call_id", tc.callId);
+      setAttr(toolAttributes, ATTR.operationName, "execute_tool");
+      setAttr(toolAttributes, ATTR.providerName, sessionMeta.modelProvider);
+      setModelAttrs(toolAttributes, turn.model);
+      setAttr(toolAttributes, ATTR.toolName, tc.name || "tool");
+      setAttr(toolAttributes, ATTR.toolCallId, tc.callId);
       setAttr(toolAttributes, "tool_command", preview(command, maxChars));
-      setAttr(toolAttributes, "tool_args_preview", preview(tc.args, maxChars));
-      setAttr(toolAttributes, "tool_result_preview", preview(toText(tc.output), maxChars));
+      setAttr(toolAttributes, ATTR.toolCallArguments, preview(tc.args, maxChars));
+      setAttr(toolAttributes, ATTR.toolCallResult, preview(toText(tc.output), maxChars));
       setAttr(toolAttributes, "tool_result_status", tc.error ? "error" : "completed");
       setAttr(toolAttributes, "status", tc.error ? "error" : "ok");
       setAttr(toolAttributes, "reason", tc.error ? clipValue(tc.error, maxChars) : undefined);
+      setAttr(toolAttributes, "error.type", tc.error ? "_OTHER" : undefined);
       spans.push(
         makeSpan({
           traceId,

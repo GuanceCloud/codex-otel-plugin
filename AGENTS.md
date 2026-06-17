@@ -21,7 +21,10 @@
 ## 目录职责
 
 ```text
-README.md                 项目使用说明
+README.md                 项目入口与文档导航
+docs/install.md           安装、升级、卸载与安装参数说明
+docs/configuration.md     Hook 文件配置、认证与 resourceAttributes 约定
+docs/development.md       本地调试、验证与排查说明
 docs/traces.md            Trace/span/字段/token/UI 展示设计说明
 docs/metrics.md           Metrics 指标体系、tag、token 映射和 OTLP 形态说明
 AGENTS.md                 Agent 维护指令
@@ -29,7 +32,7 @@ package.json              Node.js 脚本与项目元信息
 scripts/install.sh        本地 Codex marketplace/plugin 安装脚本
 scripts/install-release.sh 远程下载安装与升级脚本
 src/codex-hook-wrapper.js Codex Stop hook 入口和远端上报
-src/codex-config.js       gtrace.json 与环境变量解析
+src/codex-config.js       gtrace.json 解析
 src/codex-parse.js        Codex rollout JSONL 解析
 src/codex-collector.js    Codex turn 到 span 的核心映射
 src/codex-metrics.js      从内部 span 派生 OTLP metrics 语义
@@ -74,7 +77,8 @@ Codex hook 读取配置顺序：
 
 1. `~/.codex/gtrace.json`
 2. 当前项目 `.codex/gtrace.json`
-3. 环境变量覆盖
+
+运行时配置只支持 `gtrace.json` 文件，不再支持通过环境变量覆盖。
 
 推荐 Dataway/GTrace 风格：
 

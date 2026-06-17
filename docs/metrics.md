@@ -219,15 +219,6 @@ token histogram 默认 bucket：
 }
 ```
 
-环境变量覆盖：
-
-```bash
-export GTRACE_METRICS_PATH="v1/metrics"
-export GTRACE_CODEX_METRICS_PATH="v1/metrics"
-export GTRACE_OTEL_METRICS_URL="http://localhost:4318/v1/metrics"
-export GTRACE_CODEX_OTEL_METRICS_URL="http://localhost:4318/v1/metrics"
-```
-
 安装脚本支持：
 
 ```bash

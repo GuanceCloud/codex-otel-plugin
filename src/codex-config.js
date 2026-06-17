@@ -97,7 +97,6 @@ function parseHeaders(value) {
 export function resolveConfig(options = {}) {
   const home = options.home ?? process.env.HOME ?? os.homedir();
   const cwd = options.cwd ?? process.cwd();
-  const env = options.env ?? process.env;
   const globalConfig = readJsonIfExists(path.join(home, ".codex", "gtrace.json"));
   const localConfig = readJsonIfExists(path.join(cwd, ".codex", "gtrace.json"));
   const merged = {
@@ -112,52 +111,39 @@ export function resolveConfig(options = {}) {
     ...localConfig,
   };
 
-  const tags = parseTags(env.GTRACE_CODEX_TAGS) ?? parseTags(merged.tags);
+  const tags = parseTags(merged.tags);
   const configuredResourceAttributes = parseResourceAttributes(merged.resourceAttributes);
-  const envResourceAttributes = parseResourceAttributes(
-    env.GTRACE_CODEX_RESOURCE_ATTRIBUTES ?? env.GTRACE_RESOURCE_ATTRIBUTES,
-  );
 
   return {
     ...merged,
-    enabled: parseBoolean(env.TRACE_TO_GTRACE) ?? parseBoolean(env.GTRACE_CODEX_ENABLED) ?? merged.enabled,
-    public_key: env.GTRACE_PUBLIC_KEY ?? env.GTRACE_CODEX_PUBLIC_KEY ?? merged.public_key,
-    secret_key: env.GTRACE_SECRET_KEY ?? env.GTRACE_CODEX_SECRET_KEY ?? merged.secret_key,
-    endpoint: normalizeEndpoint(
-      env.GTRACE_ENDPOINT ??
-        env.GTRACE_CODEX_ENDPOINT ??
-        merged.endpoint ??
-        merged.base_url,
-    ),
-    base_url: normalizeEndpoint(env.GTRACE_BASE_URL ?? env.GTRACE_CODEX_BASE_URL ?? merged.base_url),
+    enabled: parseBoolean(merged.enabled) ?? false,
+    public_key: merged.public_key,
+    secret_key: merged.secret_key,
+    endpoint: normalizeEndpoint(merged.endpoint ?? merged.base_url),
+    base_url: normalizeEndpoint(merged.base_url),
     tracePath: normalizeSignalPath(
-      env.GTRACE_TRACE_PATH ?? env.GTRACE_CODEX_TRACE_PATH ?? merged.tracePath,
+      merged.tracePath,
       "api/public/otel/v1/traces",
     ),
     metricsPath: normalizeSignalPath(
-      env.GTRACE_METRICS_PATH ?? env.GTRACE_CODEX_METRICS_PATH ?? merged.metricsPath,
+      merged.metricsPath,
       "api/public/otel/v1/metrics",
     ),
-    otel_traces_url:
-      env.GTRACE_OTEL_TRACES_URL ?? env.GTRACE_CODEX_OTEL_TRACES_URL ?? merged.otel_traces_url,
-    otel_metrics_url:
-      env.GTRACE_OTEL_METRICS_URL ?? env.GTRACE_CODEX_OTEL_METRICS_URL ?? merged.otel_metrics_url,
+    otel_traces_url: merged.otel_traces_url,
+    otel_metrics_url: merged.otel_metrics_url,
     protocol: "http/protobuf",
     headers: parseHeaders(merged.headers),
-    environment: env.GTRACE_ENVIRONMENT ?? env.GTRACE_CODEX_ENVIRONMENT ?? merged.environment,
-    user_id: env.GTRACE_CODEX_USER_ID ?? merged.user_id,
+    environment: merged.environment,
+    user_id: merged.user_id,
     tags,
-    metadata: parseMetadata(env.GTRACE_CODEX_METADATA) ?? parseMetadata(merged.metadata),
+    metadata: parseMetadata(merged.metadata),
     resourceAttributes: {
       ...(tagsToResourceAttributes(tags) ?? {}),
       ...(configuredResourceAttributes ?? {}),
-      ...(envResourceAttributes ?? {}),
     },
-    max_chars: parseInteger(env.GTRACE_CODEX_MAX_CHARS) ?? parseInteger(merged.max_chars) ?? 20_000,
-    debug: parseBoolean(env.GTRACE_CODEX_DEBUG) ?? parseBoolean(merged.debug) ?? false,
-    fail_on_error:
-      parseBoolean(env.GTRACE_CODEX_FAIL_ON_ERROR) ?? parseBoolean(merged.fail_on_error) ?? false,
-    hook_log_file:
-      env.GTRACE_CODEX_HOOK_LOG_FILE ?? merged.hook_log_file ?? path.join(home, ".codex", "gtrace-hook.log"),
+    max_chars: parseInteger(merged.max_chars) ?? 20_000,
+    debug: parseBoolean(merged.debug) ?? false,
+    fail_on_error: parseBoolean(merged.fail_on_error) ?? false,
+    hook_log_file: merged.hook_log_file ?? path.join(home, ".codex", "gtrace-hook.log"),
   };
 }

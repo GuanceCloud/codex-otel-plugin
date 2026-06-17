@@ -13,8 +13,6 @@
 - 支持 Dataway/GTrace 风格的 `endpoint + tracePath + metricsPath + headers` 配置。
 - 提供本地 ingest/debug server，便于接收和检查 OTLP JSON/protobuf 数据。
 
-Trace 字段、Span name、token 口径和 UI 展示建议见 [docs/traces.md](docs/traces.md)。
-
 ## 工作流程
 
 ```text
@@ -30,6 +28,9 @@ src/codex-parse.js 解析 rollout JSONL
 src/codex-collector.js 生成 span
     |
     v
+src/codex-metrics.js 从 span 派生 metrics
+    |
+    v
 src/codex-otlp.js / src/proto.js 编码 OTLP protobuf
     |
     v
@@ -37,30 +38,14 @@ POST <endpoint>/<tracePath>
 POST <endpoint>/<metricsPath>
 ```
 
-安装脚本会写入的 Hook 命令：
+## 快速开始
 
-```text
-node ~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>/src/codex-hook-wrapper.js
-```
-
-## 运行要求
+要求：
 
 - Node.js >= 22
 - 远程安装需要 `curl`、`tar`、`gzip`
-- 无需安装运行时依赖
 
-说明：Codex 会触发 Stop hook，但不会为 hook 提供 Node.js 运行时。当前 hook 是 Node.js 脚本，因此客户环境需要有 Node.js 22+。
-
-如果 Node.js 已安装但不在非交互 shell 的 `PATH` 中，可以指定 Node 路径：
-
-```bash
-curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
-  | CODEX_OTEL_NODE=/path/to/node bash -s -- latest --endpoint <endpoint> --x-token <token>
-```
-
-## 安装
-
-推荐使用远程安装器，不需要 `git clone`：
+推荐直接使用远程安装器：
 
 ```bash
 curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
@@ -69,392 +54,45 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
       --x-token <token>
 ```
 
-安装脚本会完成：
+安装完成后重启 Codex，让 Stop hook 重新加载。
 
-- 创建本地 Codex marketplace：`~/.codex/plugin-sources/codex-otel-plugin`
-- 写入插件：`tracing@codex-otel-plugin`
-- 写入 Stop hook：`node ~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>/src/codex-hook-wrapper.js`
-- 写入 Codex 配置：`~/.codex/config.toml`
-- 同步完整运行文件到 Codex 插件缓存：`~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>`
-- 写入上报配置：`~/.codex/gtrace.json`
+更多安装、升级、卸载和参数说明见 [docs/install.md](docs/install.md)。
 
-`~/.codex/config.toml` 会写入以下配置，用于让 Codex 启用插件：
+## 文档导航
 
-```toml
-[marketplaces.codex-otel-plugin]
-source_type = "local"
-source = "/home/<user>/.codex/plugin-sources/codex-otel-plugin"
-
-[plugins."tracing@codex-otel-plugin"]
-enabled = true
-```
-
-上面的命令会生成：
-
-```json
-{
-  "enabled": true,
-  "endpoint": "https://llm-openway.guance.com",
-  "tracePath": "v1/write/otel-llm",
-  "metricsPath": "v1/write/otel-metrics",
-  "headers": {
-    "X-Token": "<token>",
-    "To-Headless": "true"
-  },
-  "resourceAttributes": {
-    "deployment.environment": "prod",
-    "app_id": "codex-monitor",
-    "app_name": "Codex OTEL",
-    "agent_type": "assistant",
-    "agent_source": "codex"
-  },
-  "debug": true
-}
-```
-
-配置完成后重启 Codex，让 Stop hook 重新加载。
-
-如果只安装文件、稍后手动配置：
-
-```bash
-curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
-  | bash -s -- latest --no-config
-```
-
-安装后最小自检：
-
-```bash
-codex plugin list
-codex plugin marketplace list
-find ~/.codex/plugins/cache/codex-otel-plugin/tracing -maxdepth 2 -type d | sort
-cat ~/.codex/gtrace.json
-```
-
-预期结果：
-
-- `codex plugin list` 中存在 `tracing@codex-otel-plugin`，状态为 `installed, enabled`
-- `codex plugin marketplace list` 中存在 `codex-otel-plugin`，root 为 `~/.codex/plugin-sources/codex-otel-plugin`
-- cache 目录中存在版本目录，例如 `~/.codex/plugins/cache/codex-otel-plugin/tracing/0.1.0`
-- `~/.codex/gtrace.json` 中包含 `endpoint`、`tracePath`、`metricsPath`、`headers.X-Token`
-
-## 升级
-
-升级也使用同一条命令。已安装过的环境可以省略 `--endpoint` 和 `--x-token`，脚本会复用现有 `~/.codex/gtrace.json`：
-
-```bash
-curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
-  | bash -s -- latest
-```
-
-升级脚本会重新下载插件文件、重写插件和 hook 配置，更新 `~/.codex/config.toml` 并同步 Codex 插件缓存；不会覆盖 `~/.codex/gtrace.json`。
-
-安装指定版本：
-
-```bash
-curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
-  | bash -s -- v0.1.0
-```
-
-## 卸载
-
-只卸载插件：
-
-```bash
-codex plugin remove tracing@codex-otel-plugin
-```
-
-彻底清理本地 source、cache 和上报配置：
-
-```bash
-codex plugin remove tracing@codex-otel-plugin
-codex plugin marketplace remove codex-otel-plugin
-rm -rf ~/.codex/plugin-sources/codex-otel-plugin
-rm -rf ~/.codex/plugins/cache/codex-otel-plugin
-rm -f ~/.codex/gtrace.json
-```
-
-如果只想停用插件但保留安装文件，也可以只执行：
-
-```bash
-codex plugin remove tracing@codex-otel-plugin
-```
-
-不要先手工删除 `~/.codex/plugin-sources/codex-otel-plugin`，再执行 `codex plugin list` 或 `codex plugin marketplace list`。如果 marketplace 配置还在，而 source 目录已经被手工删掉，Codex 会报 marketplace manifest 缺失。
-
-安装参数：
-
-| 参数 | 说明 |
+| 文档 | 说明 |
 | --- | --- |
-| `latest` / `vX.Y.Z` / `X.Y.Z` | 安装版本，默认 `latest` |
-| `--endpoint URL` | 接收端基础地址，例如 `https://llm-openway.guance.com` |
-| `--x-token TOKEN` | 写入 `headers.X-Token` |
-| `--trace-path PATH` | Trace 写入路径，GTrace 默认 `v1/write/otel-llm` |
-| `--metrics-path PATH` | Metrics 写入路径，GTrace 默认 `v1/write/otel-metrics` |
-| `--type gtrace|otlp` | 配置预设，默认 `gtrace` |
-| `--header KEY=VALUE` | 追加 HTTP header，可重复 |
-| `--tag KEY=VALUE` | 追加全局 resource attribute，同时兼容写入 metadata，可重复 |
-| `--config-file PATH` | 指定上报配置文件，默认 `~/.codex/gtrace.json` |
-| `--codex-config PATH` | 指定 Codex 配置文件，默认 `~/.codex/config.toml` |
-| `--no-config` | 只安装插件，不写 `gtrace.json` |
+| [docs/install.md](docs/install.md) | 安装、升级、卸载、安装参数和开发安装 |
+| [docs/configuration.md](docs/configuration.md) | Hook 文件配置、认证和 `resourceAttributes` 约定 |
+| [docs/development.md](docs/development.md) | 本地调试服务、验证命令和排查方式 |
+| [docs/traces.md](docs/traces.md) | Trace/span 结构、字段命名、token 口径和展示建议 |
+| [docs/metrics.md](docs/metrics.md) | Metrics 指标体系、tag、token 映射和 OTLP 形态 |
 
-如果需要指定自定义 release 资产地址，可以覆盖下载 URL：
+## 数据模型
 
-```bash
-curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
-  | CODEX_OTEL_ARCHIVE_URL=<plugin-release-tar-gz-url> bash -s -- latest --endpoint <endpoint> --x-token <token>
-```
+Trace 字段、Span name、token 口径和 UI 展示建议见 [docs/traces.md](docs/traces.md)。
 
-开发安装：
+Metrics 指标体系、tag 设计和 OTLP 形态见 [docs/metrics.md](docs/metrics.md)。
 
-```bash
-git clone https://github.com/GuanceCloud/codex-otel-plugin.git
-cd codex-otel-plugin
-./scripts/install.sh --refresh --endpoint https://llm-openway.guance.com --x-token <token>
-```
+当前 Metrics 只从当前 turn 的 spans 派生以下核心指标：
 
-## 开发命令
+- `gen_ai.agent.request.count`
+- `gen_ai.agent.request.duration`
+- `gen_ai.agent.operation.count`
+- `gen_ai.agent.operation.duration`
+- `gen_ai.agent.token.usage`
 
-```bash
-npm test
-npm start
-npm run codex:hook
-```
+Metrics 默认带 `session_id`，不带 `session_key` / `run_id`。全局筛选类 tag 建议通过 `resourceAttributes` 放在 OTLP `resource.attributes` 中，并由 trace 和 metrics 共用。
 
-`npm start` 会启动本地调试服务，默认监听：
+## 开发
 
-```text
-http://localhost:3030
-```
-
-## Codex Hook 配置
-
-Hook 会读取以下配置：
-
-1. `~/.codex/gtrace.json`
-2. 当前项目下的 `.codex/gtrace.json`
-3. 环境变量覆盖
-
-本地调试配置：
-
-```json
-{
-  "enabled": true,
-  "endpoint": "http://localhost:3030",
-  "tracePath": "api/public/otel/v1/traces",
-  "metricsPath": "api/public/otel/v1/metrics",
-  "resourceAttributes": {
-    "deployment.environment": "dev",
-    "app_id": "codex-local"
-  },
-  "debug": true
-}
-```
-
-如果 `endpoint` 已经是完整 OTLP traces / metrics 地址，可以直接配置 `otel_traces_url` 和 `otel_metrics_url`：
-
-```json
-{
-  "enabled": true,
-  "otel_traces_url": "http://localhost:4318/v1/traces",
-  "otel_metrics_url": "http://localhost:4318/v1/metrics",
-  "debug": true
-}
-```
-
-兼容 Basic Auth：
-
-```json
-{
-  "enabled": true,
-  "endpoint": "http://localhost:3030",
-  "tracePath": "api/public/otel/v1/traces",
-  "metricsPath": "api/public/otel/v1/metrics",
-  "public_key": "pk-test",
-  "secret_key": "sk-test"
-}
-```
-
-如果 `headers.Authorization` 已配置，hook 会优先使用该值，不再自动覆盖。
-
-## 环境变量
-
-常用覆盖项：
-
-```bash
-export GTRACE_CODEX_ENABLED=true
-export GTRACE_ENDPOINT="http://localhost:4318"
-export GTRACE_TRACE_PATH="v1/traces"
-export GTRACE_METRICS_PATH="v1/metrics"
-export GTRACE_OTEL_TRACES_URL="http://localhost:4318/v1/traces"
-export GTRACE_OTEL_METRICS_URL="http://localhost:4318/v1/metrics"
-export GTRACE_CODEX_RESOURCE_ATTRIBUTES='{"deployment.environment":"dev","app_id":"codex-local"}'
-export GTRACE_CODEX_DEBUG=true
-```
-
-认证相关：
-
-```bash
-export GTRACE_PUBLIC_KEY="pk-test"
-export GTRACE_SECRET_KEY="sk-test"
-```
-
-排查相关：
-
-```bash
-export GTRACE_CODEX_HOOK_LOG_FILE="$HOME/.codex/gtrace-hook.log"
-export GTRACE_CODEX_FAIL_ON_ERROR=true
-```
-
-## 本地调试服务
-
-启动：
-
-```bash
-npm start
-```
-
-接口：
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `GET` | `/health` | 本地服务健康检查 |
-| `GET` | `/api/public/health` | OTLP ingest 健康检查 |
-| `POST` | `/api/public/otel/v1/traces` | 接收 OTLP Trace JSON/protobuf |
-| `POST` | `/api/public/otel/v1/metrics` | 接收 OTLP Metrics JSON/protobuf |
-| `POST` | `/api/gtrace/v1/codex-spans` | 接收原生 JSON 调试 span |
-| `GET` | `/traces?limit=50` | 查看最近规范化 span |
-| `GET` | `/metrics?limit=50` | 查看最近规范化 metric data point |
-
-本地落盘目录：
-
-```text
-data/batches/*.json
-data/spans.ndjson
-data/metrics.ndjson
-```
-
-`data/` 只用于调试，不是字段规范来源。
-
-## Trace 数据模型
-
-一轮 Codex 请求生成一棵 trace 树：
-
-```text
-agent_run
-├── llm
-│   ├── assistant
-│   ├── tool:exec_command
-│   └── tool:apply_patch
-├── llm
-│   └── assistant
-└── llm
-```
-
-核心约定：
-
-- `agent_run` 表示一次 Codex turn 的根 span。
-- `llm` 表示一次模型调用。
-- `assistant` 表示一次助手消息输出，parent 是对应的 `llm` span；同一个 `llm` step 内最多生成一个聚合后的 `assistant` span。
-- `tool:<name>` 表示一次工具调用。
-- `llm` span 的结束时间至少覆盖其下 assistant / tool 子节点，避免父节点显示为 `0ns` 而子节点仍有持续时间。
-- 字段使用扁平 canonical tag。
-- 模型字段统一使用 `model_name`。
-- `agent_run` 额外包含 `session_create_at`、`session_updated_at`、`session_channel` 三个会话级字段。
-- `llm` span 的 `usage_*` 是单次模型调用口径。
-- `agent_run` span 的 `usage_*` 是当前 turn 汇总口径。
-- `assistant` span 不携带 `usage_*`，避免重复计算 token。
-- `tool:*` span 会保留 `tool_call_id`，并从 `args.cmd` 或 `args.command` 提取 `tool_command`，用于区分并行工具调用。
-- 只有启动上下文、没有真实用户输入、模型输出、工具调用或 token usage 的空白 turn 不会上报。
-
-详细字段说明见 [docs/traces.md](docs/traces.md)。
-
-## Metrics 数据模型
-
-Metrics 与 traces 在同一次 Stop hook 中上报，第一版只从当前 turn 的 spans 派生核心指标。完整指标设计、tag、token 映射和 OTLP 形态见 [docs/metrics.md](docs/metrics.md)。
-
-| 指标名 | 类型 | 单位 | 来源 |
-| --- | --- | --- | --- |
-| `gen_ai.agent.request.count` | Counter | `1` | 每个 `agent_run` span 加 1 |
-| `gen_ai.agent.request.duration` | Histogram | `ms` | `agent_run` span duration |
-| `gen_ai.agent.operation.count` | Counter | `1` | 每个 `llm` 和 `tool:*` span 加 1 |
-| `gen_ai.agent.operation.duration` | Histogram | `ms` | `llm` 和 `tool:*` span duration |
-| `gen_ai.agent.token.usage` | Histogram | `{token}` | 每个 `llm` span 的 `usage_*` 字段 |
-
-Metrics 默认带 `session_id`，不带 `session_key` / `run_id`。
-
-全局筛选类 tag 建议放在 `resourceAttributes`，trace 和 metrics 会共享同一批 resource attributes。推荐最小组合：
-
-- `host`
-- `deployment.environment`
-- `app_id`
-- `app_name`
-- `agent_type`
-- `agent_source`
-
-`host` 默认会自动采集当前宿主机 hostname，也可以通过 `resourceAttributes.host` 覆盖。
-
-## 验证
-
-修改代码或字段口径后至少运行：
+常用命令：
 
 ```bash
 npm test
 npm ls --all
+npm start
+npm run codex:hook
 ```
 
-期望结果：
-
-```text
-9 tests passed
-```
-
-```text
-gtrace@0.1.1 /home/liurui/code/codex-otel-plugin
-└── (empty)
-```
-
-测试覆盖：
-
-- OTLP JSON ingest。
-- OTLP protobuf ingest。
-- Codex hook 解析 rollout 并上报 OTLP Trace/Metrics protobuf。
-- Stop hook 早于 `task_complete` 写入时的 completed 状态推断。
-- 空白启动 turn 过滤，不生成 OTLP span。
-
-## 排查
-
-查看 hook 日志：
-
-```bash
-tail -n 100 ~/.codex/gtrace-hook.log
-```
-
-查看本地 ingest 数据：
-
-```bash
-curl "http://localhost:3030/traces?limit=20"
-curl "http://localhost:3030/metrics?limit=20"
-tail -n 20 data/spans.ndjson
-tail -n 20 data/metrics.ndjson
-ls -lt data/batches | head
-```
-
-查看已上传 turn 标记：
-
-```bash
-find ~/.codex/sessions -name "*.gtrace" -type f
-```
-
-如果 Stop hook 报错，优先检查：
-
-- `~/.codex/gtrace.json` 是否启用。
-- `endpoint`、`tracePath`、`metricsPath`、`otel_traces_url` 或 `otel_metrics_url` 是否指向正确 OTLP 接口。
-- 认证 header 是否正确。
-- `~/.codex/gtrace-hook.log` 中的 HTTP 状态码和错误信息。
-
-## 维护约束
-
-- 不提交真实 token、真实用户输入或敏感 rollout 内容。
-- 保持无运行时第三方依赖，除非明确改变项目约束。
-- 字段命名以 [docs/traces.md](docs/traces.md) 为准。
-- 修改 span 层级、字段名或 token 口径时，同步更新测试和文档。
+更多本地调试、验证和排查说明见 [docs/development.md](docs/development.md)。

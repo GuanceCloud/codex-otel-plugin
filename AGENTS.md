@@ -60,7 +60,7 @@ npm ls --all
 当前目标是无运行时 npm 第三方依赖，`npm ls --all` 应保持：
 
 ```text
-gtrace@0.1.3 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.2 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 

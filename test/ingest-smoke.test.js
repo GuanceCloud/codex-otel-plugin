@@ -194,7 +194,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("request_model"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("response_model"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("session_key"), false);
-  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("session_id"), false);
+  assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("session_id"), true);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("session_agent"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("provider_name"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("model_name"), false);
@@ -220,6 +220,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     "openai",
   );
   assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.conversation.id"), "sess-basic");
+  assert.equal(attrValue(uploadedSpans[0].attributes, "session_id"), "sess-basic");
   assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.agent.name"), "codex");
   assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.operation.name"), "invoke_agent");
   assert.equal(
@@ -303,7 +304,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes["gen_ai.conversation.id"] === "sess-basic"));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_key === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.run_id === undefined));
-  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_id === undefined));
+  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_id === "sess-basic"));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.operation_name === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.token_type === undefined));
   assert.deepEqual(

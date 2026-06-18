@@ -49,6 +49,7 @@ span 关系：
 | 字段 | 含义 | 常见 span |
 | --- | --- | --- |
 | `gen_ai.conversation.id` | Codex session ID | 全部 |
+| `session_id` | Codex session ID 兼容字段，值与 `gen_ai.conversation.id` 相同 | 全部 |
 | `gen_ai.agent.name` | Agent 名称，当前为 `codex` | 全部 |
 | `gen_ai.operation.name` | GenAI 操作名：`invoke_agent`、`chat`、`execute_tool` | `agent_run`、`llm`、`tool:*` |
 | `gen_ai.provider.name` | 模型供应商，例如 `openai` | `agent_run`、`llm`、`assistant`、`tool:*` |
@@ -116,7 +117,7 @@ Stop hook 可能早于 `task_complete` 写入。解析器会在已有 `agent_mes
 
 | 旧字段 | 新字段 / 处理方式 |
 | --- | --- |
-| `session_id` | `gen_ai.conversation.id` |
+| `session_id` | 兼容保留，同时继续输出 `gen_ai.conversation.id` |
 | `session_agent` | `gen_ai.agent.name` |
 | `agent_version` | `gen_ai.agent.version` |
 | `provider_name` | `gen_ai.provider.name` |

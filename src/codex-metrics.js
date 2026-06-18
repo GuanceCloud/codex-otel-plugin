@@ -67,6 +67,7 @@ function operationOutcome(span) {
 function baseAttrs(span) {
   const attributes = {};
   setAttr(attributes, "gen_ai.conversation.id", span.attributes?.["gen_ai.conversation.id"]);
+  setAttr(attributes, "session_id", span.attributes?.session_id ?? span.attributes?.["gen_ai.conversation.id"]);
   setAttr(attributes, "gen_ai.operation.name", span.attributes?.["gen_ai.operation.name"]);
   setAttr(attributes, "gen_ai.provider.name", span.attributes?.["gen_ai.provider.name"]);
   setAttr(attributes, "gen_ai.request.model", span.attributes?.["gen_ai.request.model"]);
@@ -90,6 +91,7 @@ function metric(meta, span, value, attributes) {
 function requestMetrics(span) {
   const attributes = {
     "gen_ai.conversation.id": span.attributes?.["gen_ai.conversation.id"],
+    session_id: span.attributes?.session_id ?? span.attributes?.["gen_ai.conversation.id"],
     "error.type": span.attributes?.["error.type"],
   };
   setAttr(attributes, "final_status", requestOutcome(span));

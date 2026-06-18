@@ -60,7 +60,7 @@ npm ls --all
 当前目标是无运行时 npm 第三方依赖，`npm ls --all` 应保持：
 
 ```text
-gtrace@0.1.2 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.3 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 
@@ -145,9 +145,9 @@ docs/traces.md
 - 字段优先使用 OpenTelemetry GenAI semantic conventions
 - `agent_run` 额外包含 `session_create_at`、`session_updated_at`、`session_channel`
 - 模型字段使用 `gen_ai.request.model` 和 `gen_ai.response.model`
-- 会话字段使用 `gen_ai.conversation.id`
+- 会话字段使用 `gen_ai.conversation.id`，并兼容保留 `session_id`
 - 工具字段使用 `gen_ai.tool.*`
-- 不再使用 `model_name`、`provider_name`、`session_id`、`tool_name` 等旧自定义字段
+- 不再使用 `model_name`、`provider_name`、`tool_name` 等旧自定义字段；`session_id` 继续作为兼容字段保留
 - 不再使用 `request_model` 和 `response_model`
 - 不生成旧兼容语义前缀字段
 - 不生成 `gtrace.*` 业务前缀字段
@@ -196,7 +196,7 @@ docs/metrics.md
 - `gen_ai.client.operation.duration`
 - `gen_ai.client.token.usage`
 
-Metrics 默认带 `gen_ai.conversation.id`，用于与 trace 侧会话字段对齐；默认不带 `session_key` / `run_id`。不要新增 session 累计指标或 runtime 队列类指标，除非用户明确要求并同步设计去重状态。
+Metrics 默认带 `gen_ai.conversation.id`，并兼容保留 `session_id`，用于与 trace 侧会话字段对齐；默认不带 `session_key` / `run_id`。不要新增 session 累计指标或 runtime 队列类指标，除非用户明确要求并同步设计去重状态。
 
 `gen_ai.client.token.usage` 只生成 `gen_ai.token.type=input|output`。cache read 和 reasoning token 只保留在 trace attributes 中，不生成默认 token metric。
 

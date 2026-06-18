@@ -250,6 +250,7 @@ function commonAttributes(config, sessionMeta) {
   const attributes = {
     [ATTR.agentName]: "codex",
     [ATTR.conversationId]: sessionMeta.sessionId,
+    session_id: sessionMeta.sessionId,
     request_type: "user_request",
     is_internal_request: false,
   };

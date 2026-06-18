@@ -98,7 +98,7 @@ Options:
   --trace-path     Trace route. Defaults to v1/write/otel-llm for gtrace and v1/traces for otlp.
   --metrics-path   Metrics route. Defaults to v1/write/otel-metrics for gtrace and v1/metrics for otlp.
   --header         Extra HTTP header as KEY=VALUE. Can be repeated.
-  --tag            Global resource attribute as KEY=VALUE. Also kept in metadata for compatibility. Can be repeated.
+  --tag            Global resource attribute as KEY=VALUE. Written to resourceAttributes. Can be repeated.
   --config-file    Config file. Default: $CODEX_HOME/gtrace.json.
   --codex-config   Codex config file. Default: $CODEX_HOME/config.toml.
   --no-config      Install plugin files only; do not create or update gtrace.json.
@@ -515,22 +515,28 @@ if (Object.keys(config.headers).length === 0) {
   delete config.headers;
 }
 
-config.tags = Array.isArray(config.tags) ? config.tags : [];
 config.metadata = config.metadata && typeof config.metadata === "object" && !Array.isArray(config.metadata)
   ? config.metadata
   : {};
 config.resourceAttributes = config.resourceAttributes && typeof config.resourceAttributes === "object" && !Array.isArray(config.resourceAttributes)
   ? config.resourceAttributes
   : {};
+if (Array.isArray(config.tags)) {
+  for (const tag of config.tags) {
+    const [key, ...rest] = String(tag).split("=");
+    if (!key || rest.length === 0) continue;
+    const value = rest.join("=");
+    if (!(key in config.resourceAttributes)) config.resourceAttributes[key] = value;
+  }
+  delete config.tags;
+}
 for (const tag of tags) {
   const [key, ...rest] = String(tag).split("=");
   if (!key || rest.length === 0) continue;
   const value = rest.join("=");
-  if (!config.tags.includes(tag)) config.tags.push(tag);
-  config.metadata[key] = value;
   config.resourceAttributes[key] = value;
+  if (config.metadata[key] === value) delete config.metadata[key];
 }
-if (config.tags.length === 0) delete config.tags;
 if (Object.keys(config.metadata).length === 0) delete config.metadata;
 if (Object.keys(config.resourceAttributes).length === 0) delete config.resourceAttributes;
 

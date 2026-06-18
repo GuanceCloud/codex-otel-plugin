@@ -107,5 +107,7 @@ Codex hook 按以下顺序读取配置：
 - `host` 默认自动采集当前宿主机 hostname，也可通过 `resourceAttributes.host` 覆盖。
 - 不要把 `run_id`、真实用户输入或高基数一次性字段放进 `resourceAttributes`。
 - 安装脚本的 `--tag KEY=VALUE` 会把值写入 `resourceAttributes`。
+- `tags` 只作为兼容输入保留，运行时会被折叠进 `resourceAttributes`；新配置不需要同时保留 `tags`、`metadata` 和 `resourceAttributes` 三份相同内容。
+- `metadata` 会写成 span attributes；只有你明确需要把某些自定义字段复制到每个 span 上时才需要配置它。
 
 如需调整配置，请直接修改 `~/.codex/gtrace.json` 或当前项目 `.codex/gtrace.json`。

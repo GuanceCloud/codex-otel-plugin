@@ -52,9 +52,19 @@ span 关系：
 | `session_id` | Codex session ID 兼容字段，值与 `gen_ai.conversation.id` 相同 | 全部 |
 | `gen_ai.agent.name` | Agent 名称，当前为 `codex` | 全部 |
 | `gen_ai.operation.name` | GenAI 操作名：`invoke_agent`、`chat`、`execute_tool` | `agent_run`、`llm`、`tool:*` |
+| `gen_ai.input.messages` | 结构化输入消息数组，当前按 OpenTelemetry GenAI message schema 输出 | `agent_run`、`llm` |
+| `gen_ai.output.messages` | 结构化输出消息数组，当前按 OpenTelemetry GenAI message schema 输出 | `agent_run`、`llm` |
 | `gen_ai.provider.name` | 模型供应商，例如 `openai` | `agent_run`、`llm`、`assistant`、`tool:*` |
 | `gen_ai.request.model` | 请求模型名 | `agent_run`、`llm`、`assistant`、`tool:*` |
 | `gen_ai.response.model` | 响应模型名 | `agent_run`、`llm`、`assistant`、`tool:*` |
+
+当前消息映射约定：
+
+- `agent_run.gen_ai.input.messages`：当前 turn 的用户输入。
+- `agent_run.gen_ai.output.messages`：当前 turn 的最终助手输出。
+- 首个 `llm.gen_ai.input.messages`：用户输入。
+- 后续 `llm.gen_ai.input.messages`：上一轮工具调用结果，按 `role=tool` + `tool_call_response` part 输出。
+- `llm.gen_ai.output.messages`：当前模型输出，文本回复用 `text` part，reasoning 用 `reasoning` part，工具请求用 `tool_call` part。
 
 ### Token 字段
 
@@ -118,6 +128,7 @@ Stop hook 可能早于 `task_complete` 写入。解析器会在已有 `agent_mes
 | 旧字段 | 新字段 / 处理方式 |
 | --- | --- |
 | `session_id` | 兼容保留，同时继续输出 `gen_ai.conversation.id` |
+| 无统一结构化输入/输出字段 | 新增 `gen_ai.input.messages`、`gen_ai.output.messages` |
 | `session_agent` | `gen_ai.agent.name` |
 | `agent_version` | `gen_ai.agent.version` |
 | `provider_name` | `gen_ai.provider.name` |

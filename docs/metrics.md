@@ -4,6 +4,8 @@
 
 当前 Metrics 按 OpenTelemetry GenAI semantic conventions 输出；metrics 仍从同批 trace spans 派生，不重新解析 transcript。
 
+`gen_ai.input.messages`、`gen_ai.output.messages` 属于 trace span attributes，本插件当前不会把它们复制为 metrics tags，避免高基数和大字段放大。
+
 ## 上报链路
 
 ```text

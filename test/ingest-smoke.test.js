@@ -235,17 +235,67 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.cache_read.input_tokens"), 50);
   assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.output_tokens"), 50);
   assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.reasoning.output_tokens"), 5);
+  assert.deepEqual(attrValue(agentRun.attributes, "gen_ai.input.messages"), [
+    {
+      role: "user",
+      parts: [{ type: "text", content: "List the files in the repo" }],
+    },
+  ]);
+  assert.deepEqual(attrValue(agentRun.attributes, "gen_ai.output.messages"), [
+    {
+      role: "assistant",
+      parts: [{ type: "text", content: "There are two files: file1.txt and file2.txt." }],
+      finish_reason: "stop",
+    },
+  ]);
 
   const llmSpans = uploadedSpans.filter((span) => span.name === "llm");
   assert.ok(llmSpans.every((span) => spanEndNs(span) > spanStartNs(span)));
   assert.ok(llmSpans.every((span) => attrValue(span.attributes, "session_key") === undefined));
   assert.ok(llmSpans.every((span) => attrValue(span.attributes, "gen_ai.operation.name") === "chat"));
+  const firstLlm = llmSpans.find((span) => attrValue(span.attributes, "step_index") === 0);
+  assert.deepEqual(attrValue(firstLlm.attributes, "gen_ai.input.messages"), [
+    {
+      role: "user",
+      parts: [{ type: "text", content: "List the files in the repo" }],
+    },
+  ]);
+  assert.deepEqual(attrValue(firstLlm.attributes, "gen_ai.output.messages"), [
+    {
+      role: "assistant",
+      parts: [
+        { type: "reasoning", content: "I'll list files with ls." },
+        { type: "tool_call", name: "exec_command", id: "call-1", arguments: '{"command":["ls"]}' },
+      ],
+      finish_reason: "tool_call",
+    },
+  ]);
   const cachedLlm = llmSpans.find(
     (span) => attrValue(span.attributes, "gen_ai.usage.cache_read.input_tokens") === 50,
   );
   assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.input_tokens"), 150);
   assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.cache_read.input_tokens"), 50);
   assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.output_tokens"), 30);
+  assert.deepEqual(attrValue(cachedLlm.attributes, "gen_ai.input.messages"), [
+    {
+      role: "tool",
+      name: "exec_command",
+      parts: [
+        {
+          type: "tool_call_response",
+          id: "call-1",
+          response: "file1.txt\nfile2.txt",
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(attrValue(cachedLlm.attributes, "gen_ai.output.messages"), [
+    {
+      role: "assistant",
+      parts: [{ type: "text", content: "There are two files: file1.txt and file2.txt." }],
+      finish_reason: "stop",
+    },
+  ]);
 
   const assistantSpan = uploadedSpans.find((span) => span.name === "assistant");
   assert.equal(attrValue(assistantSpan.attributes, "role"), "assistant");

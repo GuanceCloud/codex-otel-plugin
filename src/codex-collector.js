@@ -11,7 +11,9 @@ const ATTR = {
   agentName: "gen_ai.agent.name",
   agentVersion: "gen_ai.agent.version",
   conversationId: "gen_ai.conversation.id",
+  inputMessages: "gen_ai.input.messages",
   operationName: "gen_ai.operation.name",
+  outputMessages: "gen_ai.output.messages",
   outputType: "gen_ai.output.type",
   providerName: "gen_ai.provider.name",
   requestModel: "gen_ai.request.model",
@@ -128,6 +130,87 @@ function setUsageAttrs(attributes, usage) {
   setAttr(attributes, ATTR.usageOutputTokens, usage?.output);
   setAttr(attributes, ATTR.usageCacheReadInputTokens, usage?.cache_read_input_tokens);
   setAttr(attributes, ATTR.usageReasoningOutputTokens, usage?.reasoning_output_tokens);
+}
+
+function messageValue(value, maxChars) {
+  if (value === undefined || value === null) return undefined;
+  return clipValue(serialize(value), maxChars);
+}
+
+function textPart(value, maxChars) {
+  const content = messageValue(value, maxChars);
+  return content ? { type: "text", content } : undefined;
+}
+
+function reasoningPart(value, maxChars) {
+  const content = messageValue(value, maxChars);
+  return content ? { type: "reasoning", content } : undefined;
+}
+
+function toolCallRequestPart(tc, maxChars) {
+  if (!tc?.name) return undefined;
+  const part = {
+    type: "tool_call",
+    name: tc.name,
+  };
+  setAttr(part, "id", tc.callId);
+  setAttr(part, "arguments", messageValue(tc.args, maxChars));
+  return part;
+}
+
+function toolCallResponsePart(tc, maxChars) {
+  const output = messageValue(tc.output, maxChars);
+  const error = messageValue(tc.error, maxChars);
+  if (output === undefined && error === undefined) return undefined;
+
+  const part = {
+    type: "tool_call_response",
+    response:
+      error === undefined
+        ? output
+        : {
+            ...(output !== undefined ? { output } : {}),
+            error,
+          },
+  };
+  setAttr(part, "id", tc.callId);
+  return part;
+}
+
+function buildInputMessages(userInput, toolCalls, maxChars) {
+  const messages = [];
+  const userText = textPart(userInput, maxChars);
+  if (userText) messages.push({ role: "user", parts: [userText] });
+
+  for (const tc of toolCalls ?? []) {
+    const part = toolCallResponsePart(tc, maxChars);
+    if (!part) continue;
+    const message = { role: "tool", parts: [part] };
+    setAttr(message, "name", tc.name);
+    messages.push(message);
+  }
+
+  return messages.length > 0 ? messages : undefined;
+}
+
+function buildOutputMessages({ text, reasoning, toolCalls, finishReason }, maxChars) {
+  const parts = [];
+  const reasoningMessagePart = reasoningPart(reasoning, maxChars);
+  const textMessagePart = textPart(text, maxChars);
+  if (reasoningMessagePart) parts.push(reasoningMessagePart);
+  if (textMessagePart) parts.push(textMessagePart);
+  for (const tc of toolCalls ?? []) {
+    const toolCallPart = toolCallRequestPart(tc, maxChars);
+    if (toolCallPart) parts.push(toolCallPart);
+  }
+  if (parts.length === 0) return undefined;
+  return [
+    {
+      role: "assistant",
+      parts,
+      finish_reason: finishReason,
+    },
+  ];
 }
 
 function flattenMetadata(attributes, prefix, metadata = {}) {
@@ -300,6 +383,19 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   setAttr(rootAttributes, "input_length", turn.userInput?.length);
   setAttr(rootAttributes, "output_preview", preview(turn.finalOutput, maxChars));
   setAttr(rootAttributes, "output_length", turn.finalOutput?.length);
+  setAttr(rootAttributes, ATTR.inputMessages, buildInputMessages(turn.userInput, [], maxChars));
+  setAttr(
+    rootAttributes,
+    ATTR.outputMessages,
+    buildOutputMessages(
+      {
+        text: turn.finalOutput,
+        toolCalls: [],
+        finishReason: turn.aborted ? "error" : "stop",
+      },
+      maxChars,
+    ),
+  );
   setAttr(rootAttributes, "tool_count", turn.steps.reduce((n, s) => n + s.toolCalls.length, 0));
   setUsageAttrs(rootAttributes, rootUsage);
   setAttr(rootAttributes, "final_status", statusFromTurn(turn));
@@ -324,6 +420,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   ];
 
   let previousToolResults;
+  let previousToolCalls;
   turn.steps.forEach((step, index) => {
     const generationSpanId = randomSpanId();
     const usage = usageDetails(step.usage);
@@ -340,6 +437,24 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     setAttr(attributes, "input_length", preview(generationInput, maxChars)?.length);
     setAttr(attributes, "output_preview", preview(generationOutput, maxChars));
     setAttr(attributes, "output_length", preview(generationOutput, maxChars)?.length);
+    setAttr(
+      attributes,
+      ATTR.inputMessages,
+      buildInputMessages(index === 0 ? turn.userInput : undefined, previousToolCalls, maxChars),
+    );
+    setAttr(
+      attributes,
+      ATTR.outputMessages,
+      buildOutputMessages(
+        {
+          text: step.text,
+          reasoning: step.reasoning,
+          toolCalls: step.toolCalls,
+          finishReason: step.toolCalls.length > 0 ? "tool_call" : "stop",
+        },
+        maxChars,
+      ),
+    );
     setAttr(attributes, "output_kind", step.toolCalls.length > 0 ? "tool_call" : "text");
     setAttr(attributes, ATTR.outputType, "text");
     setUsageAttrs(attributes, usage);
@@ -443,6 +558,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
             ...(tc.error ? { error: clipValue(tc.error, maxChars) } : {}),
           }))
         : undefined;
+    previousToolCalls = step.toolCalls.length > 0 ? step.toolCalls : undefined;
   });
 
   return { spans, traceId, rootSpanId };

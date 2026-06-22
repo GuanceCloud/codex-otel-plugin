@@ -6,7 +6,7 @@
 
 ## 能力概览
 
-- 采集 Codex turn、模型调用、工具调用和 token usage。
+- 采集 Codex turn、模型调用、工具调用、结构化 input/output messages 和 token usage。
 - 生成 `agent_run`、`llm`、`assistant`、`tool:<name>` 四类 span。
 - 使用 OTLP Trace 与 Metrics HTTP/protobuf 上报。
 - Metrics 从同批 trace spans 派生，触发时机与 traces 相同，不做定时上报。
@@ -70,7 +70,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 
 ## 数据模型
 
-Trace 字段、Span name、token 口径和 UI 展示建议见 [docs/traces.md](docs/traces.md)。
+Trace 字段、Span name、`gen_ai.input.messages` / `gen_ai.output.messages` 结构、token 口径和 UI 展示建议见 [docs/traces.md](docs/traces.md)。
 
 Metrics 指标体系、tag 设计和 OTLP 形态见 [docs/metrics.md](docs/metrics.md)。
 

@@ -146,6 +146,7 @@ docs/traces.md
 - `agent_run` 额外包含 `session_create_at`、`session_updated_at`、`session_channel`
 - 模型字段使用 `gen_ai.request.model` 和 `gen_ai.response.model`
 - 会话字段使用 `gen_ai.conversation.id`，并兼容保留 `session_id`
+- 结构化消息字段使用 `gen_ai.input.messages` 和 `gen_ai.output.messages`
 - 工具字段使用 `gen_ai.tool.*`
 - 不再使用 `model_name`、`provider_name`、`tool_name` 等旧自定义字段；`session_id` 继续作为兼容字段保留
 - 不再使用 `request_model` 和 `response_model`

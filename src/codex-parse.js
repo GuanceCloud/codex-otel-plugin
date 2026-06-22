@@ -52,7 +52,10 @@ function extractReasoning(item) {
       .join("\n");
   }
   if (Array.isArray(item.summary) && item.summary.length > 0) {
-    return item.summary.map((entry) => toText(entry)).filter(Boolean).join("\n");
+    return item.summary
+      .map((entry) => (entry && typeof entry === "object" && "text" in entry ? toText(entry.text) : toText(entry)))
+      .filter(Boolean)
+      .join("\n");
   }
   return "";
 }

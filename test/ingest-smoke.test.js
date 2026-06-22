@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -333,6 +333,71 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.client.token.usage"));
 });
 
+test("concurrent Codex hooks only upload one copy for the same transcript", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "gtrace-hook-race-home-"));
+  const sessionDir = path.join(home, "sessions");
+  await mkdirp(path.join(home, ".codex"));
+  await mkdirp(sessionDir);
+
+  const rollout = path.join(sessionDir, "rollout-race-main.jsonl");
+  await writeFile(rollout, buildCodexRolloutFixture(), "utf-8");
+  await writeFile(
+    path.join(home, ".codex", "gtrace.json"),
+    JSON.stringify(
+      {
+        enabled: true,
+        public_key: "pk-test",
+        secret_key: "sk-test",
+        endpoint: baseUrl,
+        tracePath: "api/public/otel/v1/traces",
+        metricsPath: "api/public/otel/v1/metrics",
+        headers: {
+          "x-gtrace-sdk-name": "gtrace-codex-race",
+        },
+        debug: true,
+        fail_on_error: true,
+        hook_log_file: path.join(home, ".codex", "gtrace-hook.log"),
+      },
+      null,
+      2,
+    ),
+  );
+
+  const beforeTraceBatches = await countBatches((batch) => batch.span_count > 0);
+  const beforeMetricBatches = await countBatches((batch) => batch.metric_count > 0);
+  const hookPayload = JSON.stringify({ transcript_path: rollout });
+  const env = {
+    ...process.env,
+    HOME: home,
+    CODEX_HOME: path.join(home, ".codex"),
+  };
+
+  const [first, second] = await Promise.all([
+    spawnHook(process.execPath, ["src/codex-hook-wrapper.js"], {
+      cwd: path.resolve(import.meta.dirname, ".."),
+      input: hookPayload,
+      env,
+    }),
+    spawnHook(process.execPath, ["src/codex-hook-wrapper.js"], {
+      cwd: path.resolve(import.meta.dirname, ".."),
+      input: hookPayload,
+      env,
+    }),
+  ]);
+
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(await countBatches((batch) => batch.span_count > 0), beforeTraceBatches + 1);
+  assert.equal(await countBatches((batch) => batch.metric_count > 0), beforeMetricBatches + 1);
+  assert.equal(await readFile(`${rollout}.gtrace`, "utf-8"), "turn-1\n");
+
+  const log = await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8");
+  assert.match(log, /uploaded spans/);
+  assert.match(log, /skipped duplicate hook run/);
+
+  await assert.rejects(stat(`${rollout}.gtrace.lock`), { code: "ENOENT" });
+});
+
 test("Codex parser infers completed status when Stop hook runs before task_complete is written", () => {
   const { turns } = parseSession([
     row("2026-06-03T10:00:00.000Z", "session_meta", {
@@ -594,6 +659,17 @@ async function latestBatch(predicate = () => true) {
     if (predicate(batch)) return batch;
   }
   throw new Error("no matching batch found");
+}
+
+async function countBatches(predicate = () => true) {
+  const batchDir = path.join(dataDir, "batches");
+  const files = (await readdir(batchDir)).filter((file) => file.endsWith(".json")).sort();
+  let count = 0;
+  for (const file of files) {
+    const batch = JSON.parse(await readFile(path.join(batchDir, file), "utf-8"));
+    if (predicate(batch)) count += 1;
+  }
+  return count;
 }
 
 function attrValue(attributes, key) {

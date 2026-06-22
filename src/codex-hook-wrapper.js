@@ -4,7 +4,7 @@ import { collectRollout } from "./codex-collector.js";
 import { resolveConfig } from "./codex-config.js";
 import { buildCodexMetrics } from "./codex-metrics.js";
 import { codexMetricsToOtlpProtobufRequest, codexSpansToOtlpProtobufRequest } from "./codex-otlp.js";
-import { markTurnUploaded } from "./codex-sidecar.js";
+import { acquireRolloutLock, markTurnUploaded, releaseRolloutLock } from "./codex-sidecar.js";
 import { readStdin } from "./codex-utils.js";
 import { encodeExportMetricsServiceRequest, encodeExportTraceServiceRequest } from "./proto.js";
 
@@ -94,24 +94,38 @@ export async function runHook(options = {}) {
     return;
   }
 
-  const result = await collectRollout(hookInput.transcript_path, config);
-  await appendLog(config, "parsed rollout", {
-    transcript_path: hookInput.transcript_path,
-    turns: result.turns.length,
-    spans: result.spans.length,
+  const rolloutLock = await acquireRolloutLock(hookInput.transcript_path, {
+    staleMs: config.lock_stale_ms,
   });
-  if (result.spans.length === 0) return;
-
-  const response = await uploadTraces(config, result.spans);
-  for (const turnId of result.completedTurnIds ?? []) {
-    await markTurnUploaded(hookInput.transcript_path, turnId);
+  if (!rolloutLock) {
+    await appendLog(config, "skipped duplicate hook run", {
+      transcript_path: hookInput.transcript_path,
+    });
+    return;
   }
-  await appendLog(config, "uploaded spans", response);
 
-  const metrics = buildCodexMetrics(result.spans);
-  if (metrics.length > 0) {
-    const metricsResponse = await uploadMetrics(config, metrics);
-    await appendLog(config, "uploaded metrics", { ...metricsResponse, metrics: metrics.length });
+  try {
+    const result = await collectRollout(hookInput.transcript_path, config);
+    await appendLog(config, "parsed rollout", {
+      transcript_path: hookInput.transcript_path,
+      turns: result.turns.length,
+      spans: result.spans.length,
+    });
+    if (result.spans.length === 0) return;
+
+    const response = await uploadTraces(config, result.spans);
+    for (const turnId of result.completedTurnIds ?? []) {
+      await markTurnUploaded(hookInput.transcript_path, turnId);
+    }
+    await appendLog(config, "uploaded spans", response);
+
+    const metrics = buildCodexMetrics(result.spans);
+    if (metrics.length > 0) {
+      const metricsResponse = await uploadMetrics(config, metrics);
+      await appendLog(config, "uploaded metrics", { ...metricsResponse, metrics: metrics.length });
+    }
+  } finally {
+    await releaseRolloutLock(rolloutLock);
   }
 }
 

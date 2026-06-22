@@ -63,7 +63,7 @@ npm ls --all
 ```
 
 ```text
-gtrace@0.1.3 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.2 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 
@@ -99,9 +99,16 @@ ls -lt data/batches | head
 find ~/.codex/sessions -name "*.gtrace" -type f
 ```
 
+查看并发去重锁：
+
+```bash
+find ~/.codex/sessions -name "*.gtrace.lock" -type f
+```
+
 如果 Stop hook 报错，优先检查：
 
 - `~/.codex/gtrace.json` 是否启用
 - `endpoint`、`tracePath`、`metricsPath`、`otel_traces_url` 或 `otel_metrics_url` 是否指向正确 OTLP 接口
 - 认证 header 是否正确
 - `~/.codex/gtrace-hook.log` 中的 HTTP 状态码和错误信息
+- 如果看到重复数据，检查 `~/.codex/gtrace-hook.log` 是否存在 `skipped duplicate hook run`，它表示同一个 transcript 的并发 hook 已被锁抑制

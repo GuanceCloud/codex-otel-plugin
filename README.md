@@ -7,7 +7,7 @@
 ## 能力概览
 
 - 采集 Codex turn、模型调用、工具调用、结构化 input/output messages 和 token usage。
-- 生成 `agent_run`、`llm`、`assistant`、`tool:<name>` 四类 span。
+- 生成 `invoke_agent`、`llm`、`assistant`、`tool:<name>` 四类 span。
 - 使用 OTLP Trace 与 Metrics HTTP/protobuf 上报。
 - Metrics 从同批 trace spans 派生，触发时机与 traces 相同，不做定时上报。
 - 支持 Dataway/GTrace 风格的 `endpoint + tracePath + metricsPath + headers` 配置。

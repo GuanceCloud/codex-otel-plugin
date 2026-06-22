@@ -114,8 +114,8 @@ export async function runHook(options = {}) {
     if (result.spans.length === 0) return;
 
     const response = await uploadTraces(config, result.spans);
-    for (const turnId of result.completedTurnIds ?? []) {
-      await markTurnUploaded(hookInput.transcript_path, turnId);
+    for (const item of result.uploadedTurnStates ?? []) {
+      await markTurnUploaded(hookInput.transcript_path, item.turnId, item.fingerprint);
     }
     await appendLog(config, "uploaded spans", response);
 

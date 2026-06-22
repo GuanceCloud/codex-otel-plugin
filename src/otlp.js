@@ -217,7 +217,7 @@ function extractGtrace(attributes, spanName) {
 }
 
 function observationTypeFromSpanName(spanName) {
-  if (spanName === "agent_run") return "agent";
+  if (spanName === "invoke_agent") return "agent";
   if (spanName === "llm") return "llm";
   if (spanName === "assistant") return "assistant";
   if (String(spanName).startsWith("tool:")) return "tool";

@@ -137,7 +137,7 @@ function toolMetrics(span) {
 export function buildCodexMetrics(spans = []) {
   const metrics = [];
   for (const span of spans) {
-    if (span.name === "agent_run") metrics.push(...requestMetrics(span));
+    if (span.name === "invoke_agent") metrics.push(...requestMetrics(span));
     else if (span.name === "llm") metrics.push(...llmMetrics(span));
     else if (String(span.name).startsWith("tool:")) metrics.push(...toolMetrics(span));
   }

@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { loadRollout, parseSession } from "./codex-parse.js";
-import { loadUploadedTurnIds } from "./codex-sidecar.js";
+import { isLegacyTurnState, loadUploadedTurnStates } from "./codex-sidecar.js";
 import { clipValue, toText } from "./codex-utils.js";
 
 const ATTR = {
@@ -267,7 +267,7 @@ function extractGtrace(attributes, spanName) {
 }
 
 function observationTypeFromSpanName(spanName) {
-  if (spanName === "agent_run") return "agent";
+  if (spanName === "invoke_agent") return "agent";
   if (spanName === "llm") return "llm";
   if (spanName === "assistant") return "assistant";
   if (String(spanName).startsWith("tool:")) return "tool";
@@ -408,7 +408,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       traceId,
       spanId: rootSpanId,
       parentId: ctx.parentSpanId ? ctx.parentSpanId : undefined,
-      name: "agent_run",
+      name: "invoke_agent",
       start: turn.startTime,
       end: turn.endTime,
       attributes: rootAttributes,
@@ -574,6 +574,33 @@ function serialize(value) {
   }
 }
 
+function turnFingerprint(turn) {
+  const digest = crypto.createHash("sha256");
+  digest.update(
+    JSON.stringify({
+      turnId: turn.turnId,
+      completed: turn.completed,
+      aborted: turn.aborted,
+      startTime: turn.startTime,
+      endTime: turn.endTime,
+      model: turn.model,
+      userInput: turn.userInput,
+      finalOutput: turn.finalOutput,
+      subagentThreadIds: turn.subagentThreadIds,
+      steps: turn.steps.map((step) => ({
+        startTime: step.startTime,
+        endTime: step.endTime,
+        text: step.text,
+        reasoning: step.reasoning,
+        usage: step.usage,
+        assistantMessages: step.assistantMessages,
+        toolCalls: step.toolCalls,
+      })),
+    }),
+  );
+  return digest.digest("hex");
+}
+
 async function findSubagentRollout(parentFile, threadId) {
   const suffix = `-${threadId}.jsonl`;
   const root = path.resolve(path.dirname(parentFile), "../../..");
@@ -603,7 +630,7 @@ async function findSubagentRollout(parentFile, threadId) {
 export async function collectRollout(rolloutFile, config, ctx = {}) {
   const { sessionMeta, turns } = parseSession(await loadRollout(rolloutFile));
   const allSpans = [];
-  const completedTurnIds = [];
+  const uploadedTurnStates = [];
 
   if (ctx.parentSpanId) {
     for (const turn of turns) {
@@ -615,13 +642,18 @@ export async function collectRollout(rolloutFile, config, ctx = {}) {
       });
       allSpans.push(...built.spans);
     }
-    return { sessionMeta, turns, spans: allSpans, completedTurnIds };
+    return { sessionMeta, turns, spans: allSpans, uploadedTurnStates };
   }
 
-  const uploaded = await loadUploadedTurnIds(rolloutFile);
+  const uploaded = await loadUploadedTurnStates(rolloutFile);
   for (const turn of turns) {
-    if (turn.completed && turn.turnId && uploaded.has(turn.turnId)) continue;
     if (!isObservableTurn(turn)) continue;
+    const fingerprint = turn.turnId ? turnFingerprint(turn) : undefined;
+    const uploadedState = turn.turnId ? uploaded.get(turn.turnId) : undefined;
+    if (turn.turnId && uploadedState) {
+      if (uploadedState === fingerprint) continue;
+      if (turn.completed && isLegacyTurnState(uploadedState)) continue;
+    }
 
     const built = buildTurnSpans(turn, sessionMeta, config, { rolloutFile });
     allSpans.push(...built.spans);
@@ -636,11 +668,11 @@ export async function collectRollout(rolloutFile, config, ctx = {}) {
       allSpans.push(...sub.spans);
     }
 
-    if (turn.completed && turn.turnId) {
-      uploaded.add(turn.turnId);
-      completedTurnIds.push(turn.turnId);
+    if (turn.turnId && fingerprint) {
+      uploaded.set(turn.turnId, fingerprint);
+      uploadedTurnStates.push({ turnId: turn.turnId, fingerprint });
     }
   }
 
-  return { sessionMeta, turns, spans: allSpans, completedTurnIds };
+  return { sessionMeta, turns, spans: allSpans, uploadedTurnStates };
 }

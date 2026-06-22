@@ -2,14 +2,14 @@
 
 本文档说明 codex-otel-plugin 上报到 OTLP Trace 的 span 结构、字段命名、token 口径和 UI 展示建议。Metrics 指标体系见 [metrics.md](metrics.md)。
 
-当前 Trace attributes 按 OpenTelemetry GenAI semantic conventions 输出。Span name 为兼容现有 UI 仍保留 `agent_run`、`llm`、`assistant`、`tool:<name>`。
+当前 Trace attributes 按 OpenTelemetry GenAI semantic conventions 输出。Span name 当前使用 `invoke_agent`、`llm`、`assistant`、`tool:<name>`。
 
 ## Trace 结构
 
 一次 Codex turn 会生成一棵 trace 树：
 
 ```text
-agent_run
+invoke_agent
 ├── llm
 │   ├── assistant
 │   └── tool:exec_command
@@ -19,8 +19,8 @@ agent_run
 
 span 关系：
 
-- `agent_run` 是一个 Codex turn 的根 span，对应 `gen_ai.operation.name=invoke_agent`。
-- `llm` 是一次模型调用，parent 是 `agent_run`，对应 `gen_ai.operation.name=chat`。
+- `invoke_agent` 是一个 Codex turn 的根 span，对应 `gen_ai.operation.name=invoke_agent`。
+- `llm` 是一次模型调用，parent 是 `invoke_agent`，对应 `gen_ai.operation.name=chat`。
 - `assistant` 是一次助手消息输出，parent 是对应的 `llm` span，不携带 token usage。
 - `tool:<name>` 是一次工具调用，parent 是触发该工具调用的 `llm` span，对应 `gen_ai.operation.name=execute_tool`。
 - `llm` span 的结束时间至少覆盖其下 assistant / tool 子节点，避免父节点显示为 `0ns` 而子节点仍有持续时间。
@@ -51,17 +51,17 @@ span 关系：
 | `gen_ai.conversation.id` | Codex session ID | 全部 |
 | `session_id` | Codex session ID 兼容字段，值与 `gen_ai.conversation.id` 相同 | 全部 |
 | `gen_ai.agent.name` | Agent 名称，当前为 `codex` | 全部 |
-| `gen_ai.operation.name` | GenAI 操作名：`invoke_agent`、`chat`、`execute_tool` | `agent_run`、`llm`、`tool:*` |
-| `gen_ai.input.messages` | 结构化输入消息数组，当前按 OpenTelemetry GenAI message schema 输出 | `agent_run`、`llm` |
-| `gen_ai.output.messages` | 结构化输出消息数组，当前按 OpenTelemetry GenAI message schema 输出 | `agent_run`、`llm` |
-| `gen_ai.provider.name` | 模型供应商，例如 `openai` | `agent_run`、`llm`、`assistant`、`tool:*` |
-| `gen_ai.request.model` | 请求模型名 | `agent_run`、`llm`、`assistant`、`tool:*` |
-| `gen_ai.response.model` | 响应模型名 | `agent_run`、`llm`、`assistant`、`tool:*` |
+| `gen_ai.operation.name` | GenAI 操作名：`invoke_agent`、`chat`、`execute_tool` | `invoke_agent`、`llm`、`tool:*` |
+| `gen_ai.input.messages` | 结构化输入消息数组，当前按 OpenTelemetry GenAI message schema 输出 | `invoke_agent`、`llm` |
+| `gen_ai.output.messages` | 结构化输出消息数组，当前按 OpenTelemetry GenAI message schema 输出 | `invoke_agent`、`llm` |
+| `gen_ai.provider.name` | 模型供应商，例如 `openai` | `invoke_agent`、`llm`、`assistant`、`tool:*` |
+| `gen_ai.request.model` | 请求模型名 | `invoke_agent`、`llm`、`assistant`、`tool:*` |
+| `gen_ai.response.model` | 响应模型名 | `invoke_agent`、`llm`、`assistant`、`tool:*` |
 
 当前消息映射约定：
 
-- `agent_run.gen_ai.input.messages`：当前 turn 的用户输入。
-- `agent_run.gen_ai.output.messages`：当前 turn 的最终助手输出。
+- `invoke_agent.gen_ai.input.messages`：当前 turn 的用户输入。
+- `invoke_agent.gen_ai.output.messages`：当前 turn 的最终助手输出。
 - 首个 `llm.gen_ai.input.messages`：用户输入。
 - 后续 `llm.gen_ai.input.messages`：上一轮工具调用结果，按 `role=tool` + `tool_call_response` part 输出。
 - `llm.gen_ai.output.messages`：当前模型输出，文本回复用 `text` part，reasoning 用 `reasoning` part，工具请求用 `tool_call` part。
@@ -70,12 +70,12 @@ span 关系：
 
 | 字段 | 含义 | 常见 span |
 | --- | --- | --- |
-| `gen_ai.usage.input_tokens` | 输入 token，包含缓存命中输入 token | `agent_run`、`llm` |
-| `gen_ai.usage.output_tokens` | 输出 token | `agent_run`、`llm` |
-| `gen_ai.usage.cache_read.input_tokens` | 命中 provider-managed cache 的输入 token | `agent_run`、`llm` |
-| `gen_ai.usage.reasoning.output_tokens` | reasoning 输出 token | `agent_run`、`llm` |
+| `gen_ai.usage.input_tokens` | 输入 token，包含缓存命中输入 token | `invoke_agent`、`llm` |
+| `gen_ai.usage.output_tokens` | 输出 token | `invoke_agent`、`llm` |
+| `gen_ai.usage.cache_read.input_tokens` | 命中 provider-managed cache 的输入 token | `invoke_agent`、`llm` |
+| `gen_ai.usage.reasoning.output_tokens` | reasoning 输出 token | `invoke_agent`、`llm` |
 
-`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`agent_run` span 上的 `gen_ai.usage.*` 表示当前 turn 内所有 `llm` span 的汇总。`assistant` span 不携带 token usage，避免重复计算。
+`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`invoke_agent` span 上的 `gen_ai.usage.*` 表示当前 turn 内所有 `llm` span 的汇总。`assistant` span 不携带 token usage，避免重复计算。
 
 `gen_ai.usage.input_tokens` 按 OpenTelemetry 语义包含所有输入 token，因此和旧 `usage_input_tokens` 的“非缓存输入 token”口径不同。
 
@@ -97,19 +97,19 @@ span 关系：
 | 字段 | 含义 | 常见 span |
 | --- | --- | --- |
 | `run_id` / `run_ids` | 当前 turn ID | 全部 |
-| `session_create_at` | 会话创建时间 | `agent_run` |
-| `session_updated_at` | 当前 turn 对应的会话更新时间 | `agent_run` |
-| `session_channel` | 会话来源通道 | `agent_run` |
-| `input_preview` / `input_length` | 输入预览与长度 | `agent_run`、`llm` |
-| `output_preview` / `output_length` | 输出预览与长度 | `agent_run`、`llm`、`assistant` |
+| `session_create_at` | 会话创建时间 | `invoke_agent` |
+| `session_updated_at` | 当前 turn 对应的会话更新时间 | `invoke_agent` |
+| `session_channel` | 会话来源通道 | `invoke_agent` |
+| `input_preview` / `input_length` | 输入预览与长度 | `invoke_agent`、`llm` |
+| `output_preview` / `output_length` | 输出预览与长度 | `invoke_agent`、`llm`、`assistant` |
 | `output_kind` | 输出类型，例如 `text`、`tool_call` | `llm`、`assistant` |
-| `tool_count` | 当前 turn 的工具调用数量 | `agent_run` |
+| `tool_count` | 当前 turn 的工具调用数量 | `invoke_agent` |
 | `tool_command` | 工具目标命令 | `tool:*` |
 | `tool_result_status` | 工具结果状态，`completed` 或 `error` | `tool:*` |
-| `final_status` | turn 最终状态 | `agent_run` |
+| `final_status` | turn 最终状态 | `invoke_agent` |
 | `status` | 业务状态，通常为 `ok` 或 `error` | 全部 |
-| `reason` | 错误或取消原因 | `agent_run`、`tool:*` |
-| `error.type` | OpenTelemetry 错误类型，当前错误时为 `_OTHER` | `agent_run`、`tool:*` |
+| `reason` | 错误或取消原因 | `invoke_agent`、`tool:*` |
+| `error.type` | OpenTelemetry 错误类型，当前错误时为 `_OTHER` | `invoke_agent`、`tool:*` |
 
 `final_status` 当前取值：
 

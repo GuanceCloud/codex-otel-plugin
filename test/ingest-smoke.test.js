@@ -205,7 +205,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("tool_call_id"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("tool_args_preview"), false);
   assert.equal(collectOtlpAttributeKeys(batch.raw_request).includes("tool_result_preview"), false);
-  assert.equal(uploadedSpans[0].name, "agent_run");
+  assert.equal(uploadedSpans[0].name, "invoke_agent");
   assert.equal(uploadedSpans[1].name, "llm");
   assert.equal(
     attrValue(uploadedSpans[0].attributes, "gen_ai.request.model"),
@@ -439,13 +439,107 @@ test("concurrent Codex hooks only upload one copy for the same transcript", asyn
   assert.equal(second.status, 0, second.stderr);
   assert.equal(await countBatches((batch) => batch.span_count > 0), beforeTraceBatches + 1);
   assert.equal(await countBatches((batch) => batch.metric_count > 0), beforeMetricBatches + 1);
-  assert.equal(await readFile(`${rollout}.gtrace`, "utf-8"), "turn-1\n");
+  assert.match(await readFile(`${rollout}.gtrace`, "utf-8"), /^turn-1\t[0-9a-f]+\n$/);
 
   const log = await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8");
   assert.match(log, /uploaded spans/);
   assert.match(log, /skipped duplicate hook run/);
 
   await assert.rejects(stat(`${rollout}.gtrace.lock`), { code: "ENOENT" });
+});
+
+test("sequential Codex hooks do not re-upload an unchanged incomplete turn", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "gtrace-hook-open-home-"));
+  const sessionDir = path.join(home, "sessions");
+  await mkdirp(path.join(home, ".codex"));
+  await mkdirp(sessionDir);
+
+  const rollout = path.join(sessionDir, "rollout-open-main.jsonl");
+  await writeFile(
+    rollout,
+    `${[
+      row("2026-06-03T10:00:00.000Z", "session_meta", {
+        id: "sess-open",
+        cli_version: "0.140.0",
+        model_provider: "openai",
+        timestamp: "2026-06-03T09:59:58.000Z",
+        source: "cli",
+      }),
+      row("2026-06-03T10:00:01.000Z", "event_msg", {
+        type: "task_started",
+        turn_id: "turn-open",
+      }),
+      row("2026-06-03T10:00:01.100Z", "turn_context", {
+        model: "gpt-5.4",
+      }),
+      row("2026-06-03T10:00:01.200Z", "event_msg", {
+        type: "user_message",
+        message: "Check current status",
+      }),
+      row("2026-06-03T10:00:02.000Z", "response_item", {
+        type: "reasoning",
+        summary: [{ text: "Need more information before answering." }],
+      }),
+      row("2026-06-03T10:00:02.200Z", "event_msg", {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 10,
+            output_tokens: 2,
+            total_tokens: 12,
+          },
+        },
+      }),
+    ].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    "utf-8",
+  );
+  await writeFile(
+    path.join(home, ".codex", "gtrace.json"),
+    JSON.stringify(
+      {
+        enabled: true,
+        public_key: "pk-test",
+        secret_key: "sk-test",
+        endpoint: baseUrl,
+        tracePath: "api/public/otel/v1/traces",
+        metricsPath: "api/public/otel/v1/metrics",
+        headers: {
+          "x-gtrace-sdk-name": "gtrace-codex-open",
+        },
+        debug: true,
+        fail_on_error: true,
+        hook_log_file: path.join(home, ".codex", "gtrace-hook.log"),
+      },
+      null,
+      2,
+    ),
+  );
+
+  const beforeTraceBatches = await countBatches((batch) => batch.span_count > 0);
+  const beforeMetricBatches = await countBatches((batch) => batch.metric_count > 0);
+  const hookPayload = JSON.stringify({ transcript_path: rollout });
+  const env = {
+    ...process.env,
+    HOME: home,
+    CODEX_HOME: path.join(home, ".codex"),
+  };
+
+  const first = await spawnHook(process.execPath, ["src/codex-hook-wrapper.js"], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    input: hookPayload,
+    env,
+  });
+  const second = await spawnHook(process.execPath, ["src/codex-hook-wrapper.js"], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    input: hookPayload,
+    env,
+  });
+
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(await countBatches((batch) => batch.span_count > 0), beforeTraceBatches + 1);
+  assert.equal(await countBatches((batch) => batch.metric_count > 0), beforeMetricBatches + 1);
+  assert.match(await readFile(`${rollout}.gtrace`, "utf-8"), /^turn-open\t[0-9a-f]+\n$/);
 });
 
 test("Codex parser infers completed status when Stop hook runs before task_complete is written", () => {
@@ -690,7 +784,7 @@ test("Codex collector skips blank turns that only contain startup context", asyn
   assert.equal(result.turns.length, 1);
   assert.equal(result.turns[0].userInput, undefined);
   assert.equal(result.spans.length, 0);
-  assert.deepEqual(result.completedTurnIds, []);
+  assert.deepEqual(result.uploadedTurnStates, []);
 });
 
 async function latestTraceBatch() {

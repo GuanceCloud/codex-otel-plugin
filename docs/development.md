@@ -99,6 +99,8 @@ ls -lt data/batches | head
 find ~/.codex/sessions -name "*.gtrace" -type f
 ```
 
+`.gtrace` 文件按行记录 `turnId<TAB>fingerprint`。旧版本留下的纯 `turnId` 行仍会兼容读取。
+
 查看并发去重锁：
 
 ```bash
@@ -112,3 +114,4 @@ find ~/.codex/sessions -name "*.gtrace.lock" -type f
 - 认证 header 是否正确
 - `~/.codex/gtrace-hook.log` 中的 HTTP 状态码和错误信息
 - 如果看到重复数据，检查 `~/.codex/gtrace-hook.log` 是否存在 `skipped duplicate hook run`，它表示同一个 transcript 的并发 hook 已被锁抑制
+- 再检查对应 transcript 的 `.gtrace` 是否持续增长但内容指纹没有变化；同一 `turnId` 的相同 fingerprint 不应再次上传

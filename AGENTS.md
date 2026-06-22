@@ -11,7 +11,7 @@
 1. Codex Stop hook 执行 `src/codex-hook-wrapper.js`
 2. hook 从 stdin 读取 Codex 传入的 `transcript_path`
 3. `src/codex-parse.js` 解析 rollout JSONL
-4. `src/codex-collector.js` 生成 `agent_run`、`llm`、`assistant`、`tool:<name>` span
+4. `src/codex-collector.js` 生成 `invoke_agent`、`llm`、`assistant`、`tool:<name>` span
 5. `src/codex-metrics.js` 从 span 派生 turn 级 metrics
 6. `src/codex-otlp.js` 和 `src/proto.js` 编码 OTLP Trace / Metrics protobuf
 7. 按 `~/.codex/gtrace.json` 或项目 `.codex/gtrace.json` 配置上报
@@ -137,13 +137,13 @@ docs/traces.md
 
 核心约定：
 
-- 根 span name 是 `agent_run`
+- 根 span name 是 `invoke_agent`
 - 模型调用 span name 是 `llm`
 - 助手消息 span name 是 `assistant`，parent 是对应的 `llm` span
 - 工具调用 span name 是 `tool:<name>`
 - 工具命令字段使用 `tool_command`，从 `args.cmd` 或 `args.command` 提取
 - 字段优先使用 OpenTelemetry GenAI semantic conventions
-- `agent_run` 额外包含 `session_create_at`、`session_updated_at`、`session_channel`
+- `invoke_agent` 额外包含 `session_create_at`、`session_updated_at`、`session_channel`
 - 模型字段使用 `gen_ai.request.model` 和 `gen_ai.response.model`
 - 会话字段使用 `gen_ai.conversation.id`，并兼容保留 `session_id`
 - 结构化消息字段使用 `gen_ai.input.messages` 和 `gen_ai.output.messages`
@@ -160,7 +160,7 @@ Token 口径：
 - `gen_ai.usage.cache_read.input_tokens`: 缓存命中的输入 token
 - `gen_ai.usage.reasoning.output_tokens`: 模型服务端返回的 reasoning token 明细
 
-`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`agent_run` span 上的 `gen_ai.usage.*` 表示当前 turn 汇总；`assistant` span 不携带 token usage，避免重复计算 token。
+`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`invoke_agent` span 上的 `gen_ai.usage.*` 表示当前 turn 汇总；`assistant` span 不携带 token usage，避免重复计算 token。
 
 ## 状态逻辑
 
@@ -172,7 +172,7 @@ Token 口径：
 
 `src/codex-parse.js` 已处理 Stop hook 早于 `task_complete` 写入的情况。若已有 `agent_message`、assistant 最终输出或带文本 step，会推断为 completed。
 
-`src/codex-collector.js` 会跳过空白 turn。没有真实用户输入、模型输出、工具调用或 token usage 的启动上下文，不应生成 `agent_run`、`llm`、`assistant` 或 `tool:*` span。
+`src/codex-collector.js` 会跳过空白 turn。没有真实用户输入、模型输出、工具调用或 token usage 的启动上下文，不应生成 `invoke_agent`、`llm`、`assistant` 或 `tool:*` span。
 
 修改该逻辑时必须保留或更新测试：
 
@@ -232,6 +232,8 @@ tail -n 100 ~/.codex/gtrace-hook.log
 ```bash
 ls -l ~/.codex/sessions/**/*.gtrace
 ```
+
+`.gtrace` sidecar 当前按 `turnId<TAB>fingerprint` 记录已上传 turn 状态；旧纯 `turnId` 行只作为历史兼容输入。
 
 查看最近本地 ingest 数据：
 

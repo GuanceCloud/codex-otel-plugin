@@ -1,23 +1,34 @@
 import * as fs from "node:fs/promises";
 
 const DEFAULT_LOCK_STALE_MS = 120_000;
+const LEGACY_MARKER = "legacy";
 
-export async function loadUploadedTurnIds(rolloutFile) {
+export async function loadUploadedTurnStates(rolloutFile) {
   try {
     const data = await fs.readFile(`${rolloutFile}.gtrace`, "utf-8");
-    return new Set(data.split("\n").filter(Boolean));
+    const out = new Map();
+    for (const line of data.split("\n").filter(Boolean)) {
+      const [turnId, fingerprint] = line.split("\t");
+      if (!turnId) continue;
+      out.set(turnId, fingerprint || LEGACY_MARKER);
+    }
+    return out;
   } catch (error) {
-    if (error.code === "ENOENT") return new Set();
+    if (error.code === "ENOENT") return new Map();
     throw error;
   }
 }
 
-export async function markTurnUploaded(rolloutFile, turnId) {
+export async function markTurnUploaded(rolloutFile, turnId, fingerprint) {
   try {
-    await fs.appendFile(`${rolloutFile}.gtrace`, `${turnId}\n`, "utf-8");
+    await fs.appendFile(`${rolloutFile}.gtrace`, `${turnId}\t${fingerprint}\n`, "utf-8");
   } catch {
     // Best-effort dedup. A failed sidecar write only risks duplicate upload next time.
   }
+}
+
+export function isLegacyTurnState(state) {
+  return state === LEGACY_MARKER;
 }
 
 export async function acquireRolloutLock(rolloutFile, options = {}) {

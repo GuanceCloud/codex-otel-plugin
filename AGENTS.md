@@ -11,7 +11,7 @@
 1. Codex Stop hook 执行 `src/codex-hook-wrapper.js`
 2. hook 从 stdin 读取 Codex 传入的 `transcript_path`
 3. `src/codex-parse.js` 解析 rollout JSONL
-4. `src/codex-collector.js` 生成 `invoke_agent`、`llm`、`assistant`、`tool:<name>` span
+4. `src/codex-collector.js` 生成 `invoke_agent`、`llm`、`assistant`、`skill:<name>`、`tool:<name>` span
 5. `src/codex-metrics.js` 从 span 派生 turn 级 metrics
 6. `src/codex-otlp.js` 和 `src/proto.js` 编码 OTLP Trace / Metrics protobuf
 7. 按 `~/.codex/gtrace.json` 或项目 `.codex/gtrace.json` 配置上报
@@ -60,7 +60,7 @@ npm ls --all
 当前目标是无运行时 npm 第三方依赖，`npm ls --all` 应保持：
 
 ```text
-gtrace@0.1.2 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.3 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 
@@ -140,14 +140,21 @@ docs/traces.md
 - 根 span name 是 `invoke_agent`
 - 模型调用 span name 是 `llm`
 - 助手消息 span name 是 `assistant`，parent 是对应的 `llm` span
+- skill span name 是 `skill:<name>`，当前只在高置信度识别到 skill 目录资源访问时生成；若已归属到某个工具调用，则 parent 是对应的 `tool:<name>`
 - 工具调用 span name 是 `tool:<name>`
+- 若工具调用已归属到某个 skill，则 `skill:<name>` parent 是对应的 `tool:<name>`，`tool:<name>` 仍直接挂到 `llm`
 - 工具命令字段使用 `tool_command`，从 `args.cmd` 或 `args.command` 提取
 - 字段优先使用 OpenTelemetry GenAI semantic conventions
 - `invoke_agent` 额外包含 `session_create_at`、`session_updated_at`、`session_channel`
 - 模型字段使用 `gen_ai.request.model` 和 `gen_ai.response.model`
+- 请求输出类型使用 `gen_ai.output.type`
+- 请求参数字段优先使用 `gen_ai.request.*`
+- 停止原因使用 `gen_ai.response.finish_reasons`
+- 系统指令和工具定义使用 `gen_ai.system_instructions`、`gen_ai.tool.definitions`
 - 会话字段使用 `gen_ai.conversation.id`，并兼容保留 `session_id`
 - 结构化消息字段使用 `gen_ai.input.messages` 和 `gen_ai.output.messages`
 - 工具字段使用 `gen_ai.tool.*`
+- skill 字段当前同时保留兼容 `skill.*`，并补充项目扩展 `gen_ai.skill.*`；其中 `description`、`version` 仅在能从 skill 元数据稳定提取时生成
 - 不再使用 `model_name`、`provider_name`、`tool_name` 等旧自定义字段；`session_id` 继续作为兼容字段保留
 - 不再使用 `request_model` 和 `response_model`
 - 不生成旧兼容语义前缀字段
@@ -172,11 +179,16 @@ Token 口径：
 
 `src/codex-parse.js` 已处理 Stop hook 早于 `task_complete` 写入的情况。若已有 `agent_message`、assistant 最终输出或带文本 step，会推断为 completed。
 
+`src/codex-collector.js` 只上报终态 turn：`completed` 或 `cancelled`。未能确认完成状态的中间态 turn 不会上报，避免同一个 `turn_id` 先发中间态、再发完成态而在平台侧形成重复链路。终态 turn 一旦成功写入 `.gtrace` sidecar，后续重解析即使 fingerprint 漂移，也不得再次上报。
+
 `src/codex-collector.js` 会跳过空白 turn。没有真实用户输入、模型输出、工具调用或 token usage 的启动上下文，不应生成 `invoke_agent`、`llm`、`assistant` 或 `tool:*` span。
 
 修改该逻辑时必须保留或更新测试：
 
 ```text
+Codex collector nests skill span under tool span while keeping assistant spans
+sequential Codex hooks skip incomplete turns and upload once after completion
+Codex collector does not reupload completed turns after sidecar fingerprint drift
 Codex parser infers completed status when Stop hook runs before task_complete is written
 Codex collector skips blank turns that only contain startup context
 ```
@@ -191,13 +203,18 @@ Codex collector skips blank turns that only contain startup context
 docs/metrics.md
 ```
 
-第一版只做 turn 级核心指标：
+当前核心指标：
 
 - `gen_ai.workflow.duration`
-- `gen_ai.client.operation.duration`
+- `gen_ai.agent.operation.count`
+- `gen_ai.agent.operation.duration`
 - `gen_ai.client.token.usage`
 
 Metrics 默认带 `gen_ai.conversation.id`，并兼容保留 `session_id`，用于与 trace 侧会话字段对齐；默认不带 `session_key` / `run_id`。不要新增 session 累计指标或 runtime 队列类指标，除非用户明确要求并同步设计去重状态。
+
+`gen_ai.workflow.duration` 当前只用于 `invoke_agent`。skill 维度不再生成 workflow 指标，统一通过 `gen_ai.agent.operation.count` / `gen_ai.agent.operation.duration` 观察。
+
+`gen_ai.agent.operation.count` / `gen_ai.agent.operation.duration` 当前用于 `llm`、`skill:*`、`tool:*`；兼容维度 `operation_name` 固定映射为 `model`、`skill`、`tool`，并同时保留 `gen_ai.operation.name=chat|skill|execute_tool`。
 
 `gen_ai.client.token.usage` 只生成 `gen_ai.token.type=input|output`。cache read 和 reasoning token 只保留在 trace attributes 中，不生成默认 token metric。
 
@@ -233,7 +250,7 @@ tail -n 100 ~/.codex/gtrace-hook.log
 ls -l ~/.codex/sessions/**/*.gtrace
 ```
 
-`.gtrace` sidecar 当前按 `turnId<TAB>fingerprint` 记录已上传 turn 状态；旧纯 `turnId` 行只作为历史兼容输入。
+`.gtrace` sidecar 当前按 `turnId<TAB>fingerprint` 记录已上传 turn 状态；旧纯 `turnId` 行只作为历史兼容输入。对于已进入 `completed` 或 `cancelled` 的终态 turn，运行时去重以 `turnId` 为准，不依赖 fingerprint 稳定性。
 
 查看最近本地 ingest 数据：
 

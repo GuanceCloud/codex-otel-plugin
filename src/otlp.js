@@ -220,6 +220,7 @@ function observationTypeFromSpanName(spanName) {
   if (spanName === "invoke_agent") return "agent";
   if (spanName === "llm") return "llm";
   if (spanName === "assistant") return "assistant";
+  if (String(spanName).startsWith("skill:")) return "skill";
   if (String(spanName).startsWith("tool:")) return "tool";
   return undefined;
 }

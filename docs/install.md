@@ -32,6 +32,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 
 - 创建本地 Codex marketplace：`~/.codex/plugin-sources/codex-otel-plugin`
 - 写入插件：`tracing@codex-otel-plugin`
+- 移除冲突的 tracing 插件：当前会主动执行 `codex plugin remove tracing@codex-observability-plugin`，并清理其 `plugins.*` / `hooks.state.*` 残留配置，避免同一份 transcript 被两个 Stop hook 重复上报
 - 写入 Stop hook：`node ~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>/src/codex-hook-wrapper.js`
 - 写入 Codex 配置：`~/.codex/config.toml`
 - 同步完整运行文件到 Codex 插件缓存：`~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>`
@@ -75,8 +76,9 @@ cat ~/.codex/gtrace.json
 预期结果：
 
 - `codex plugin list` 中存在 `tracing@codex-otel-plugin`，状态为 `installed, enabled`
+- 如果本机装过 `codex-observability-plugin`，其 `tracing` 插件应已被移除
 - `codex plugin marketplace list` 中存在 `codex-otel-plugin`
-- cache 目录中存在版本目录，例如 `~/.codex/plugins/cache/codex-otel-plugin/tracing/0.1.2`
+- cache 目录中存在版本目录，例如 `~/.codex/plugins/cache/codex-otel-plugin/tracing/0.1.3`
 - `~/.codex/gtrace.json` 中包含 `endpoint`、`tracePath`、`metricsPath`、`headers.X-Token`
 
 ## 升级
@@ -94,7 +96,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 
 ```bash
 curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
-  | bash -s -- v0.1.2
+  | bash -s -- v0.1.3
 ```
 
 如果需要指定自定义 release 资产地址，可以覆盖下载 URL：

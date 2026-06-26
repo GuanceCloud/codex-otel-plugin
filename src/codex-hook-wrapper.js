@@ -44,6 +44,34 @@ async function appendLog(config, message, extra) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function waitForStableTranscript(transcriptPath, options = {}) {
+  const settleMs = Number.isFinite(options.settleMs) ? options.settleMs : 250;
+  const stableChecks = Number.isFinite(options.stableChecks) ? options.stableChecks : 2;
+  const maxWaitMs = Number.isFinite(options.maxWaitMs) ? options.maxWaitMs : 2_000;
+  const deadline = Date.now() + maxWaitMs;
+
+  let previous = await fs.stat(transcriptPath);
+  let stableCount = 0;
+
+  while (Date.now() < deadline) {
+    await sleep(settleMs);
+    const current = await fs.stat(transcriptPath);
+    if (current.size === previous.size && current.mtimeMs === previous.mtimeMs) {
+      stableCount += 1;
+      if (stableCount >= stableChecks) return current;
+      continue;
+    }
+    previous = current;
+    stableCount = 0;
+  }
+
+  return previous;
+}
+
 async function upload(config, signal, body) {
   const headers = { ...(config.headers ?? {}), "content-type": "application/x-protobuf" };
   const auth = authHeader(config);
@@ -105,6 +133,7 @@ export async function runHook(options = {}) {
   }
 
   try {
+    await waitForStableTranscript(hookInput.transcript_path);
     const result = await collectRollout(hookInput.transcript_path, config);
     await appendLog(config, "parsed rollout", {
       transcript_path: hookInput.transcript_path,

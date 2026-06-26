@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { loadRollout, parseSession } from "./codex-parse.js";
-import { isLegacyTurnState, loadUploadedTurnStates } from "./codex-sidecar.js";
+import { loadUploadedTurnStates } from "./codex-sidecar.js";
 import { clipValue, toText } from "./codex-utils.js";
 
 const ATTR = {
@@ -16,8 +16,29 @@ const ATTR = {
   outputMessages: "gen_ai.output.messages",
   outputType: "gen_ai.output.type",
   providerName: "gen_ai.provider.name",
+  requestChoiceCount: "gen_ai.request.choice.count",
+  requestFrequencyPenalty: "gen_ai.request.frequency_penalty",
+  requestMaxTokens: "gen_ai.request.max_tokens",
   requestModel: "gen_ai.request.model",
+  requestPresencePenalty: "gen_ai.request.presence_penalty",
+  requestSeed: "gen_ai.request.seed",
+  requestStopSequences: "gen_ai.request.stop_sequences",
+  requestTemperature: "gen_ai.request.temperature",
+  requestTopP: "gen_ai.request.top_p",
+  responseFinishReasons: "gen_ai.response.finish_reasons",
   responseModel: "gen_ai.response.model",
+  skillDescription: "gen_ai.skill.description",
+  systemInstructions: "gen_ai.system_instructions",
+  skillNameGenAi: "gen_ai.skill.name",
+  skillName: "skill.name",
+  skillPath: "skill.path",
+  skillPathGenAi: "gen_ai.skill.path",
+  skillResultStatusGenAi: "gen_ai.skill.result.status",
+  skillSourceType: "skill.source.type",
+  skillSourceTypeGenAi: "gen_ai.skill.source.type",
+  skillResultStatus: "skill.result_status",
+  skillVersion: "gen_ai.skill.version",
+  toolDefinitions: "gen_ai.tool.definitions",
   toolCallArguments: "gen_ai.tool.call.arguments",
   toolCallId: "gen_ai.tool.call.id",
   toolCallResult: "gen_ai.tool.call.result",
@@ -27,6 +48,9 @@ const ATTR = {
   usageOutputTokens: "gen_ai.usage.output_tokens",
   usageReasoningOutputTokens: "gen_ai.usage.reasoning.output_tokens",
 };
+
+const SKILL_FILE_PATTERN = /\/[^\s"'`]+\/SKILL\.md\b/g;
+const ABSOLUTE_PATH_PATTERN = /\/[^\s"'`]+/g;
 
 function randomTraceId() {
   return crypto.randomBytes(16).toString("hex");
@@ -96,11 +120,111 @@ function isObservableTurn(turn) {
   );
 }
 
+function isTerminalTurn(turn) {
+  return Boolean(turn?.completed || turn?.aborted);
+}
+
 function preview(value, maxChars) {
   if (value === undefined || value === null) return undefined;
   const text = typeof value === "string" ? value : serialize(value);
   const normalized = text.replace(/\s+/g, " ").trim();
   return normalized ? clipValue(normalized, maxChars) : undefined;
+}
+
+function normalizeFilePath(value) {
+  if (typeof value !== "string" || !value) return undefined;
+  return value.replace(/\\/g, "/");
+}
+
+function yamlScalar(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return undefined;
+  if (
+    (text.startsWith('"') && text.endsWith('"')) ||
+    (text.startsWith("'") && text.endsWith("'"))
+  ) {
+    return text.slice(1, -1);
+  }
+  return text;
+}
+
+function parseSkillFrontmatter(content) {
+  if (typeof content !== "string") return {};
+  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/);
+  if (!match) return {};
+
+  const out = {};
+  let section;
+  for (const line of match[1].split("\n")) {
+    const entry = line.match(/^(\s*)([A-Za-z0-9_.-]+):\s*(.*)$/);
+    if (!entry) continue;
+
+    const indent = entry[1].length;
+    const key = entry[2];
+    const value = yamlScalar(entry[3]);
+    if (indent === 0) {
+      section = value === undefined ? key : undefined;
+      if (value !== undefined) out[key] = value;
+      continue;
+    }
+
+    if (section === "metadata" && value !== undefined) out[`metadata.${key}`] = value;
+  }
+
+  return out;
+}
+
+function extractSkillDescription(content) {
+  if (typeof content !== "string") return undefined;
+  const body = content.replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, "");
+  const lines = body.split("\n");
+  let inFence = false;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || !line || line.startsWith("#")) continue;
+    return line;
+  }
+  return undefined;
+}
+
+async function loadSkillMetadata(skillFile, cache) {
+  const normalized = normalizeFilePath(skillFile);
+  if (!normalized) return undefined;
+
+  const cached = cache?.get(normalized);
+  if (cached) return await cached;
+
+  const task = (async () => {
+    try {
+      const content = await fs.readFile(normalized, "utf-8");
+      const frontmatter = parseSkillFrontmatter(content);
+      let version = frontmatter.version ?? frontmatter["metadata.version"];
+      if (!version) {
+        try {
+          const pkg = JSON.parse(await fs.readFile(path.join(path.dirname(normalized), "package.json"), "utf-8"));
+          version = typeof pkg?.version === "string" ? pkg.version : undefined;
+        } catch {
+          // package.json is optional for skills
+        }
+      }
+
+      return {
+        description: frontmatter.description ?? extractSkillDescription(content),
+        version,
+      };
+    } catch {
+      return {};
+    }
+  })();
+
+  cache?.set(normalized, task);
+  const metadata = await task;
+  cache?.set(normalized, metadata);
+  return metadata;
 }
 
 function durationMs(start, end) {
@@ -135,6 +259,32 @@ function setUsageAttrs(attributes, usage) {
 function messageValue(value, maxChars) {
   if (value === undefined || value === null) return undefined;
   return clipValue(serialize(value), maxChars);
+}
+
+function clipStructuredValue(value, maxChars) {
+  if (typeof value === "string") return clipValue(value, maxChars);
+  if (Array.isArray(value)) return value.map((entry) => clipStructuredValue(entry, maxChars));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, clipStructuredValue(entry, maxChars)]),
+    );
+  }
+  return value;
+}
+
+function collectStringValues(value, out = []) {
+  if (typeof value === "string") {
+    out.push(value);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) collectStringValues(entry, out);
+    return out;
+  }
+  if (value && typeof value === "object") {
+    for (const entry of Object.values(value)) collectStringValues(entry, out);
+  }
+  return out;
 }
 
 function textPart(value, maxChars) {
@@ -213,6 +363,86 @@ function buildOutputMessages({ text, reasoning, toolCalls, finishReason }, maxCh
   ];
 }
 
+function numericAttr(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function integerAttr(value) {
+  return Number.isInteger(value) ? value : undefined;
+}
+
+function choiceCountAttr(value) {
+  return Number.isInteger(value) && value !== 1 ? value : undefined;
+}
+
+function stringArrayAttr(value) {
+  if (Array.isArray(value)) {
+    const out = value.map((entry) => String(entry)).filter(Boolean);
+    return out.length > 0 ? out : undefined;
+  }
+  if (typeof value === "string" && value) return [value];
+  return undefined;
+}
+
+function normalizeOutputType(value) {
+  const text = typeof value === "string" ? value : value?.type;
+  if (!text) return "text";
+  const normalized = String(text).toLowerCase();
+  if (normalized === "text") return "text";
+  if (normalized === "image") return "image";
+  if (normalized === "speech" || normalized === "audio") return "speech";
+  if (normalized.includes("json")) return "json";
+  return normalized;
+}
+
+function buildSystemInstructions(sessionMeta, invocationParams, maxChars) {
+  const entries = [
+    sessionMeta.baseInstructions,
+    invocationParams?.collaboration_mode?.settings?.developer_instructions,
+  ]
+    .filter((value, index, array) => typeof value === "string" && value && array.indexOf(value) === index)
+    .map((value) => textPart(value, maxChars))
+    .filter(Boolean);
+  return entries.length > 0 ? entries : undefined;
+}
+
+function normalizeToolDefinition(definition) {
+  if (!definition || typeof definition !== "object") return definition;
+  if (definition.type || !definition.name) return definition;
+  return {
+    type: "function",
+    name: definition.name,
+    ...(definition.description ? { description: definition.description } : {}),
+    ...(definition.parameters ? { parameters: definition.parameters } : {}),
+  };
+}
+
+function buildToolDefinitions(invocationParams, maxChars) {
+  const raw =
+    invocationParams?.tools ??
+    invocationParams?.tool_definitions ??
+    invocationParams?.available_tools ??
+    invocationParams?.functions;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  return raw.map((definition) => clipStructuredValue(normalizeToolDefinition(definition), maxChars));
+}
+
+function setRequestAttributes(attributes, invocationParams, maxChars) {
+  const outputType = normalizeOutputType(
+    invocationParams?.output_type ?? invocationParams?.outputType ?? invocationParams?.response_format,
+  );
+  setAttr(attributes, ATTR.outputType, outputType);
+  setAttr(attributes, ATTR.requestChoiceCount, choiceCountAttr(invocationParams?.n ?? invocationParams?.choice_count));
+  setAttr(attributes, ATTR.requestSeed, integerAttr(invocationParams?.seed));
+  setAttr(attributes, ATTR.requestTemperature, numericAttr(invocationParams?.temperature));
+  setAttr(attributes, ATTR.requestTopP, numericAttr(invocationParams?.top_p));
+  setAttr(attributes, ATTR.requestMaxTokens, integerAttr(invocationParams?.max_tokens ?? invocationParams?.max_output_tokens));
+  setAttr(attributes, ATTR.requestPresencePenalty, numericAttr(invocationParams?.presence_penalty));
+  setAttr(attributes, ATTR.requestFrequencyPenalty, numericAttr(invocationParams?.frequency_penalty));
+  setAttr(attributes, ATTR.requestStopSequences, stringArrayAttr(invocationParams?.stop_sequences ?? invocationParams?.stop));
+  setAttr(attributes, ATTR.toolDefinitions, buildToolDefinitions(invocationParams, maxChars));
+}
+
 function flattenMetadata(attributes, prefix, metadata = {}) {
   for (const [key, value] of Object.entries(metadata)) setAttr(attributes, `${prefix}.${key}`, value);
 }
@@ -270,6 +500,7 @@ function observationTypeFromSpanName(spanName) {
   if (spanName === "invoke_agent") return "agent";
   if (spanName === "llm") return "llm";
   if (spanName === "assistant") return "assistant";
+  if (String(spanName).startsWith("skill:")) return "skill";
   if (String(spanName).startsWith("tool:")) return "tool";
   return undefined;
 }
@@ -313,6 +544,104 @@ function toolCommand(tc) {
   return undefined;
 }
 
+function matchesFromText(text, pattern) {
+  if (typeof text !== "string" || !text) return [];
+  return Array.from(new Set(text.match(pattern) ?? []));
+}
+
+function skillSourceTypeFromPath(skillFile) {
+  if (skillFile.includes("/.codex/skills/.system/")) return "system";
+  if (skillFile.includes("/.codex/skills/")) return "user";
+  return "workspace";
+}
+
+function skillContextFromSkillFile(skillFile) {
+  const normalized = normalizeFilePath(skillFile);
+  if (!normalized) return undefined;
+  const rootPath = path.posix.dirname(normalized);
+  const skillName = rootPath.split("/").filter(Boolean).at(-1);
+  if (!skillName) return undefined;
+  return {
+    skillName,
+    skillFile: normalized,
+    rootPath,
+    skillSourceType: skillSourceTypeFromPath(normalized),
+  };
+}
+
+function detectSkillRefs(toolCall, activeSkillContexts = new Map()) {
+  const refs = new Map();
+  for (const text of collectStringValues(toolCall?.args)) {
+    for (const skillFile of matchesFromText(text, SKILL_FILE_PATTERN)) {
+      const direct = skillContextFromSkillFile(skillFile);
+      if (!direct) continue;
+      refs.set(direct.rootPath, { ...direct, resourcePath: direct.skillFile, direct: true });
+    }
+
+    for (const resourcePath of matchesFromText(text, ABSOLUTE_PATH_PATTERN)) {
+      const normalized = normalizeFilePath(resourcePath);
+      if (!normalized) continue;
+      for (const active of activeSkillContexts.values()) {
+        if (normalized === active.skillFile || normalized.startsWith(`${active.rootPath}/`)) {
+          refs.set(active.rootPath, { ...active, resourcePath: normalized, direct: false });
+        }
+      }
+    }
+  }
+  return Array.from(refs.values());
+}
+
+function buildSkillContexts(toolCalls = []) {
+  const contexts = new Map();
+  const toolCallToSkill = new Map();
+
+  for (const toolCall of toolCalls) {
+    const refs = detectSkillRefs(toolCall, contexts);
+    if (refs.length !== 1) continue;
+
+    const ref = refs[0];
+    const context =
+      contexts.get(ref.rootPath) ??
+      {
+        skillName: ref.skillName,
+        skillFile: ref.skillFile,
+        rootPath: ref.rootPath,
+        skillSourceType: ref.skillSourceType,
+      };
+    contexts.set(ref.rootPath, context);
+    toolCallToSkill.set(toolCall, context);
+  }
+
+  return {
+    toolCallToSkill,
+  };
+}
+
+async function populateTurnSkillMetadata(turn, cache) {
+  if (!cache) return;
+  for (const step of turn.steps ?? []) {
+    const { toolCallToSkill } = buildSkillContexts(step.toolCalls);
+    for (const skill of toolCallToSkill.values()) {
+      if (!skill?.skillFile) continue;
+      await loadSkillMetadata(skill.skillFile, cache);
+    }
+  }
+}
+
+function setSkillAttributes(attributes, skill, metadata, resultStatus, maxChars) {
+  setAttr(attributes, ATTR.skillName, skill?.skillName);
+  setAttr(attributes, ATTR.skillPath, skill?.skillFile);
+  setAttr(attributes, ATTR.skillSourceType, skill?.skillSourceType);
+  setAttr(attributes, ATTR.skillResultStatus, resultStatus);
+
+  setAttr(attributes, ATTR.skillNameGenAi, skill?.skillName);
+  setAttr(attributes, ATTR.skillPathGenAi, skill?.skillFile);
+  setAttr(attributes, ATTR.skillSourceTypeGenAi, skill?.skillSourceType);
+  setAttr(attributes, ATTR.skillResultStatusGenAi, resultStatus);
+  setAttr(attributes, ATTR.skillDescription, preview(metadata?.description, maxChars));
+  setAttr(attributes, ATTR.skillVersion, metadata?.version);
+}
+
 function assistantMessagesFromStep(step) {
   if (Array.isArray(step.assistantMessages) && step.assistantMessages.length > 0) {
     return step.assistantMessages.filter((message) => preview(message.text, 1));
@@ -332,6 +661,7 @@ function latestStepChildEndTime(step) {
 function commonAttributes(config, sessionMeta) {
   const attributes = {
     [ATTR.agentName]: "codex",
+    [ATTR.agentVersion]: sessionMeta.cliVersion,
     [ATTR.conversationId]: sessionMeta.sessionId,
     session_id: sessionMeta.sessionId,
     request_type: "user_request",
@@ -368,6 +698,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     rollout_file: ctx.rolloutFile,
     received_at: new Date().toISOString(),
   };
+  const systemInstructions = buildSystemInstructions(sessionMeta, turn.invocationParams, maxChars);
 
   const rootAttributes = commonAttributes(config, sessionMeta);
   const rootUsage = aggregateUsageDetails(turn.steps);
@@ -376,6 +707,9 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   setAttr(rootAttributes, ATTR.operationName, "invoke_agent");
   setAttr(rootAttributes, ATTR.providerName, sessionMeta.modelProvider);
   setModelAttrs(rootAttributes, turn.model);
+  setRequestAttributes(rootAttributes, turn.invocationParams, maxChars);
+  setAttr(rootAttributes, ATTR.systemInstructions, systemInstructions);
+  setAttr(rootAttributes, ATTR.responseFinishReasons, [turn.aborted ? "cancelled" : "stop"]);
   setAttr(rootAttributes, "session_create_at", sessionMeta.createdAt);
   setAttr(rootAttributes, "session_updated_at", isoFromMs(turn.endTime));
   setAttr(rootAttributes, "session_channel", sessionMeta.channel);
@@ -391,7 +725,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       {
         text: turn.finalOutput,
         toolCalls: [],
-        finishReason: turn.aborted ? "error" : "stop",
+        finishReason: turn.aborted ? "cancelled" : "stop",
       },
       maxChars,
     ),
@@ -423,6 +757,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   let previousToolCalls;
   turn.steps.forEach((step, index) => {
     const generationSpanId = randomSpanId();
+    const { toolCallToSkill } = buildSkillContexts(step.toolCalls);
     const usage = usageDetails(step.usage);
     const llmEndTime = latestStepChildEndTime(step);
     const generationInput = index === 0 ? clipValue(turn.userInput, maxChars) : previousToolResults;
@@ -433,6 +768,9 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     setAttr(attributes, ATTR.operationName, "chat");
     setAttr(attributes, ATTR.providerName, sessionMeta.modelProvider);
     setModelAttrs(attributes, turn.model);
+    setRequestAttributes(attributes, turn.invocationParams, maxChars);
+    setAttr(attributes, ATTR.systemInstructions, systemInstructions);
+    setAttr(attributes, ATTR.responseFinishReasons, [step.toolCalls.length > 0 ? "tool_call" : "stop"]);
     setAttr(attributes, "input_preview", preview(generationInput, maxChars));
     setAttr(attributes, "input_length", preview(generationInput, maxChars)?.length);
     setAttr(attributes, "output_preview", preview(generationOutput, maxChars));
@@ -456,7 +794,6 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       ),
     );
     setAttr(attributes, "output_kind", step.toolCalls.length > 0 ? "tool_call" : "text");
-    setAttr(attributes, ATTR.outputType, "text");
     setUsageAttrs(attributes, usage);
     setAttr(attributes, "step_index", index);
     setAttr(attributes, "status", "ok");
@@ -487,6 +824,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       setAttr(assistantAttributes, "run_ids", turn.turnId);
       setAttr(assistantAttributes, ATTR.providerName, sessionMeta.modelProvider);
       setModelAttrs(assistantAttributes, turn.model);
+      setAttr(assistantAttributes, ATTR.outputType, "text");
       setAttr(assistantAttributes, "role", "assistant");
       setAttr(assistantAttributes, "output_preview", preview(message.text, maxChars));
       setAttr(assistantAttributes, "output_length", message.text?.length);
@@ -518,8 +856,11 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     });
 
     for (const tc of step.toolCalls) {
+      const skill = toolCallToSkill.get(tc);
+      const skillMetadata = skill?.skillFile ? ctx.skillMetadataCache?.get(skill.skillFile) : undefined;
       const toolAttributes = commonAttributes(config, sessionMeta);
       const command = toolCommand(tc);
+      const toolSpanId = randomSpanId();
       setAttr(toolAttributes, "run_id", turn.turnId);
       setAttr(toolAttributes, "run_ids", turn.turnId);
       setAttr(toolAttributes, ATTR.operationName, "execute_tool");
@@ -530,6 +871,13 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       setAttr(toolAttributes, "tool_command", preview(command, maxChars));
       setAttr(toolAttributes, ATTR.toolCallArguments, preview(tc.args, maxChars));
       setAttr(toolAttributes, ATTR.toolCallResult, preview(toText(tc.output), maxChars));
+      setSkillAttributes(
+        toolAttributes,
+        skill,
+        skillMetadata,
+        skill ? (tc.error ? "error" : "completed") : undefined,
+        maxChars,
+      );
       setAttr(toolAttributes, "tool_result_status", tc.error ? "error" : "completed");
       setAttr(toolAttributes, "status", tc.error ? "error" : "ok");
       setAttr(toolAttributes, "reason", tc.error ? clipValue(tc.error, maxChars) : undefined);
@@ -537,11 +885,43 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       spans.push(
         makeSpan({
           traceId,
+          spanId: toolSpanId,
           parentId: generationSpanId,
           name: `tool:${tc.name || "tool"}`,
           start: tc.startTime,
           end: tc.endTime ?? step.endTime,
           attributes: toolAttributes,
+          resource,
+          scope,
+          ingest,
+          status: { code: tc.error ? "STATUS_CODE_ERROR" : "STATUS_CODE_UNSET", message: tc.error },
+        }),
+      );
+
+      if (!skill) continue;
+
+      const skillAttributes = commonAttributes(config, sessionMeta);
+      setAttr(skillAttributes, "run_id", turn.turnId);
+      setAttr(skillAttributes, "run_ids", turn.turnId);
+      setAttr(skillAttributes, ATTR.operationName, "skill");
+      setAttr(skillAttributes, ATTR.providerName, sessionMeta.modelProvider);
+      setModelAttrs(skillAttributes, turn.model);
+      setSkillAttributes(skillAttributes, skill, skillMetadata, tc.error ? "error" : "completed", maxChars);
+      setAttr(skillAttributes, "tool_count", 1);
+      setAttr(skillAttributes, "input_preview", preview(skill.skillFile, maxChars));
+      setAttr(skillAttributes, "output_preview", preview(toText(tc.output), maxChars));
+      setAttr(skillAttributes, "status", tc.error ? "error" : "ok");
+      setAttr(skillAttributes, "reason", tc.error ? clipValue(tc.error, maxChars) : undefined);
+      setAttr(skillAttributes, "error.type", tc.error ? "_OTHER" : undefined);
+
+      spans.push(
+        makeSpan({
+          traceId,
+          parentId: toolSpanId,
+          name: `skill:${skill.skillName}`,
+          start: tc.startTime,
+          end: tc.endTime ?? step.endTime,
+          attributes: skillAttributes,
           resource,
           scope,
           ingest,
@@ -631,14 +1011,17 @@ export async function collectRollout(rolloutFile, config, ctx = {}) {
   const { sessionMeta, turns } = parseSession(await loadRollout(rolloutFile));
   const allSpans = [];
   const uploadedTurnStates = [];
+  const skillMetadataCache = new Map();
 
   if (ctx.parentSpanId) {
     for (const turn of turns) {
       if (!isObservableTurn(turn)) continue;
+      await populateTurnSkillMetadata(turn, skillMetadataCache);
       const built = buildTurnSpans(turn, sessionMeta, config, {
         rolloutFile,
         traceId: ctx.traceId,
         parentSpanId: ctx.parentSpanId,
+        skillMetadataCache,
       });
       allSpans.push(...built.spans);
     }
@@ -648,14 +1031,13 @@ export async function collectRollout(rolloutFile, config, ctx = {}) {
   const uploaded = await loadUploadedTurnStates(rolloutFile);
   for (const turn of turns) {
     if (!isObservableTurn(turn)) continue;
+    if (!isTerminalTurn(turn)) continue;
+    await populateTurnSkillMetadata(turn, skillMetadataCache);
     const fingerprint = turn.turnId ? turnFingerprint(turn) : undefined;
     const uploadedState = turn.turnId ? uploaded.get(turn.turnId) : undefined;
-    if (turn.turnId && uploadedState) {
-      if (uploadedState === fingerprint) continue;
-      if (turn.completed && isLegacyTurnState(uploadedState)) continue;
-    }
+    if (turn.turnId && uploadedState) continue;
 
-    const built = buildTurnSpans(turn, sessionMeta, config, { rolloutFile });
+    const built = buildTurnSpans(turn, sessionMeta, config, { rolloutFile, skillMetadataCache });
     allSpans.push(...built.spans);
 
     for (const threadId of turn.subagentThreadIds) {

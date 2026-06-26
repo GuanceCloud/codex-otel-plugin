@@ -17,11 +17,18 @@ const TOKEN_USAGE = {
   description: "Number of input and output tokens used.",
 };
 
+const OPERATION_COUNT = {
+  name: "gen_ai.agent.operation.count",
+  type: "sum",
+  unit: "",
+  description: "Agent-side operation count.",
+};
+
 const OPERATION_DURATION = {
-  name: "gen_ai.client.operation.duration",
+  name: "gen_ai.agent.operation.duration",
   type: "histogram",
-  unit: "s",
-  description: "GenAI operation duration.",
+  unit: "ms",
+  description: "Agent-side operation duration.",
 };
 
 function setAttr(attributes, key, value) {
@@ -64,14 +71,29 @@ function operationOutcome(span) {
   return "completed";
 }
 
+function legacyOperationName(span) {
+  if (span.name === "llm") return "model";
+  if (String(span.name).startsWith("tool:")) return "tool";
+  if (String(span.name).startsWith("skill:")) return "skill";
+  return undefined;
+}
+
 function baseAttrs(span) {
   const attributes = {};
+  const modelName = span.attributes?.["gen_ai.response.model"] ?? span.attributes?.["gen_ai.request.model"];
+  setAttr(attributes, "agent_runtime", span.resource?.agent_runtime);
   setAttr(attributes, "gen_ai.conversation.id", span.attributes?.["gen_ai.conversation.id"]);
   setAttr(attributes, "session_id", span.attributes?.session_id ?? span.attributes?.["gen_ai.conversation.id"]);
+  setAttr(attributes, "operation_name", legacyOperationName(span));
   setAttr(attributes, "gen_ai.operation.name", span.attributes?.["gen_ai.operation.name"]);
+  setAttr(attributes, "outcome", operationOutcome(span));
+  setAttr(attributes, "provider_name", span.attributes?.["gen_ai.provider.name"]);
   setAttr(attributes, "gen_ai.provider.name", span.attributes?.["gen_ai.provider.name"]);
+  setAttr(attributes, "request_model", span.attributes?.["gen_ai.request.model"]);
   setAttr(attributes, "gen_ai.request.model", span.attributes?.["gen_ai.request.model"]);
+  setAttr(attributes, "response_model", span.attributes?.["gen_ai.response.model"]);
   setAttr(attributes, "gen_ai.response.model", span.attributes?.["gen_ai.response.model"]);
+  setAttr(attributes, "model_name", modelName);
   setAttr(attributes, "error.type", span.attributes?.["error.type"]);
   return attributes;
 }
@@ -90,6 +112,7 @@ function metric(meta, span, value, attributes) {
 
 function requestMetrics(span) {
   const attributes = {
+    agent_runtime: span.resource?.agent_runtime,
     "gen_ai.conversation.id": span.attributes?.["gen_ai.conversation.id"],
     session_id: span.attributes?.session_id ?? span.attributes?.["gen_ai.conversation.id"],
     "error.type": span.attributes?.["error.type"],
@@ -100,14 +123,35 @@ function requestMetrics(span) {
   return duration === undefined ? [] : [metric(WORKFLOW_DURATION, span, duration, attributes)];
 }
 
+function skillMetrics(span) {
+  const attributes = {
+    ...baseAttrs(span),
+  };
+  setAttr(attributes, "skill_name", span.attributes?.["skill.name"] ?? span.attributes?.["gen_ai.skill.name"]);
+  setAttr(attributes, "skill.name", span.attributes?.["skill.name"]);
+  setAttr(attributes, "gen_ai.skill.name", span.attributes?.["gen_ai.skill.name"]);
+  setAttr(attributes, "skill_source", span.attributes?.["skill.source.type"] ?? span.attributes?.["gen_ai.skill.source.type"]);
+  setAttr(attributes, "skill.source.type", span.attributes?.["skill.source.type"]);
+  setAttr(attributes, "gen_ai.skill.source.type", span.attributes?.["gen_ai.skill.source.type"]);
+  setAttr(attributes, "skill.result_status", span.attributes?.["skill.result_status"]);
+  setAttr(attributes, "gen_ai.skill.result.status", span.attributes?.["gen_ai.skill.result.status"]);
+  setAttr(attributes, "gen_ai.skill.version", span.attributes?.["gen_ai.skill.version"]);
+  if (operationOutcome(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
+
+  const out = [metric(OPERATION_COUNT, span, 1, attributes)];
+  const durationMs = finitePositive(span.duration_ms);
+  if (durationMs !== undefined) out.push(metric(OPERATION_DURATION, span, durationMs, attributes));
+  return out;
+}
+
 function llmMetrics(span) {
   const operationAttributes = {
     ...baseAttrs(span),
   };
   if (operationOutcome(span) === "error") setAttr(operationAttributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
-  const out = [];
-  const duration = spanDuration(span);
-  if (duration !== undefined) out.push(metric(OPERATION_DURATION, span, duration, operationAttributes));
+  const out = [metric(OPERATION_COUNT, span, 1, operationAttributes)];
+  const durationMs = finitePositive(span.duration_ms);
+  if (durationMs !== undefined) out.push(metric(OPERATION_DURATION, span, durationMs, operationAttributes));
 
   for (const [attributeName, tokenType] of TOKEN_ATTRIBUTE_TYPES) {
     const value = finitePositive(span.attributes?.[attributeName]);
@@ -127,17 +171,30 @@ function toolMetrics(span) {
     ...baseAttrs(span),
   };
   if (operationOutcome(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
+  setAttr(attributes, "tool_name", span.attributes?.["gen_ai.tool.name"] ?? String(span.name ?? "").replace(/^tool:/, ""));
   setAttr(attributes, "gen_ai.tool.name", span.attributes?.["gen_ai.tool.name"] ?? String(span.name ?? "").replace(/^tool:/, ""));
+  setAttr(attributes, "skill_name", span.attributes?.["skill.name"] ?? span.attributes?.["gen_ai.skill.name"]);
+  setAttr(attributes, "skill.name", span.attributes?.["skill.name"]);
+  setAttr(attributes, "gen_ai.skill.name", span.attributes?.["gen_ai.skill.name"]);
+  setAttr(attributes, "skill_source", span.attributes?.["skill.source.type"] ?? span.attributes?.["gen_ai.skill.source.type"]);
+  setAttr(attributes, "skill.source.type", span.attributes?.["skill.source.type"]);
+  setAttr(attributes, "gen_ai.skill.source.type", span.attributes?.["gen_ai.skill.source.type"]);
+  setAttr(attributes, "skill.result_status", span.attributes?.["skill.result_status"]);
+  setAttr(attributes, "gen_ai.skill.result.status", span.attributes?.["gen_ai.skill.result.status"]);
+  setAttr(attributes, "gen_ai.skill.version", span.attributes?.["gen_ai.skill.version"]);
   setAttr(attributes, "tool_result_status", span.attributes?.tool_result_status);
 
-  const duration = spanDuration(span);
-  return duration === undefined ? [] : [metric(OPERATION_DURATION, span, duration, attributes)];
+  const out = [metric(OPERATION_COUNT, span, 1, attributes)];
+  const durationMs = finitePositive(span.duration_ms);
+  if (durationMs !== undefined) out.push(metric(OPERATION_DURATION, span, durationMs, attributes));
+  return out;
 }
 
 export function buildCodexMetrics(spans = []) {
   const metrics = [];
   for (const span of spans) {
     if (span.name === "invoke_agent") metrics.push(...requestMetrics(span));
+    else if (String(span.name).startsWith("skill:")) metrics.push(...skillMetrics(span));
     else if (span.name === "llm") metrics.push(...llmMetrics(span));
     else if (String(span.name).startsWith("tool:")) metrics.push(...toolMetrics(span));
   }

@@ -7,6 +7,7 @@ CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$CODEX_HOME/config.toml}"
 CONFIG_FILE="${GTRACE_CONFIG_FILE:-$CODEX_HOME/gtrace.json}"
 MARKETPLACE_NAME="${MARKETPLACE_NAME:-codex-otel-plugin}"
 PLUGIN_NAME="${PLUGIN_NAME:-tracing}"
+CONFLICTING_PLUGIN_SELECTORS_JSON='["tracing@codex-observability-plugin"]'
 MARKETPLACE_ROOT="${MARKETPLACE_ROOT:-$CODEX_HOME/plugin-sources/$MARKETPLACE_NAME}"
 PLUGIN_ROOT="$MARKETPLACE_ROOT/plugins/$PLUGIN_NAME"
 REFRESH=false
@@ -373,6 +374,7 @@ write_codex_config() {
   CODEX_MARKETPLACE_NAME_RUNTIME="$MARKETPLACE_NAME" \
   CODEX_MARKETPLACE_ROOT_RUNTIME="$MARKETPLACE_ROOT" \
   CODEX_PLUGIN_SELECTOR_RUNTIME="$PLUGIN_NAME@$MARKETPLACE_NAME" \
+  CODEX_CONFLICTING_PLUGIN_SELECTORS_RUNTIME="$CONFLICTING_PLUGIN_SELECTORS_JSON" \
   "$NODE_BIN" <<'NODE'
 const fs = require("fs");
 const path = require("path");
@@ -381,6 +383,9 @@ const configFile = process.env.CODEX_CONFIG_FILE_RUNTIME;
 const marketplaceName = process.env.CODEX_MARKETPLACE_NAME_RUNTIME;
 const marketplaceRoot = process.env.CODEX_MARKETPLACE_ROOT_RUNTIME;
 const pluginSelector = process.env.CODEX_PLUGIN_SELECTOR_RUNTIME;
+const conflictingPluginSelectors = JSON.parse(
+  process.env.CODEX_CONFLICTING_PLUGIN_SELECTORS_RUNTIME || "[]",
+);
 
 function tomlString(value) {
   return JSON.stringify(String(value));
@@ -401,6 +406,21 @@ function removeSection(source, header) {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
+function removeSectionsMatching(source, predicate) {
+  const lines = source.split(/\n/);
+  const out = [];
+  let skipping = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\[[^\]]+\]/.test(trimmed)) {
+      skipping = predicate(trimmed);
+      if (skipping) continue;
+    }
+    if (!skipping) out.push(line);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
 fs.mkdirSync(path.dirname(configFile), { recursive: true });
 let content = "";
 if (fs.existsSync(configFile)) {
@@ -413,6 +433,11 @@ const pluginHeader = `[plugins.${tomlString(pluginSelector)}]`;
 content = removeSection(content, marketplaceHeader);
 content = removeSection(content, quotedMarketplaceHeader);
 content = removeSection(content, pluginHeader);
+for (const selector of conflictingPluginSelectors) {
+  content = removeSection(content, `[plugins.${tomlString(selector)}]`);
+  const hookStatePrefix = `[hooks.state.${tomlString(selector).slice(0, -1)}:`;
+  content = removeSectionsMatching(content, (header) => header.startsWith(hookStatePrefix));
+}
 
 const nextSections = [
   `${marketplaceHeader}
@@ -576,6 +601,18 @@ Next steps:
 EOF
   exit 0
 fi
+
+remove_conflicting_plugins() {
+  local selectors
+  mapfile -t selectors < <("$NODE_BIN" -e 'for (const item of JSON.parse(process.argv[1] || "[]")) process.stdout.write(String(item) + "\n")' "$CONFLICTING_PLUGIN_SELECTORS_JSON")
+  local selector
+  for selector in "${selectors[@]}"; do
+    [[ -n "$selector" ]] || continue
+    codex plugin remove "$selector" >/dev/null 2>&1 || true
+  done
+}
+
+remove_conflicting_plugins
 
 if ! codex plugin marketplace list | awk 'NR > 1 {print $1}' | grep -qx "$MARKETPLACE_NAME"; then
   codex plugin marketplace add "$MARKETPLACE_ROOT"

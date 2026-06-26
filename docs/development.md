@@ -59,11 +59,11 @@ npm ls --all
 期望结果：
 
 ```text
-10 tests passed
+14 tests passed
 ```
 
 ```text
-gtrace@0.1.2 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.3 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 
@@ -72,6 +72,8 @@ gtrace@0.1.2 /home/liurui/code/codex-otel-plugin
 - OTLP JSON ingest
 - OTLP protobuf ingest
 - Codex hook 解析 rollout 并上报 OTLP Trace/Metrics protobuf
+- 未完成 turn 不上报，完成后只上传一次
+- 保留 assistant span，同时让 `tool -> skill` 反映 skill 调用关系
 - Stop hook 早于 `task_complete` 写入时的 completed 状态推断
 - 空白启动 turn 过滤，不生成 OTLP span
 
@@ -114,4 +116,5 @@ find ~/.codex/sessions -name "*.gtrace.lock" -type f
 - 认证 header 是否正确
 - `~/.codex/gtrace-hook.log` 中的 HTTP 状态码和错误信息
 - 如果看到重复数据，检查 `~/.codex/gtrace-hook.log` 是否存在 `skipped duplicate hook run`，它表示同一个 transcript 的并发 hook 已被锁抑制
-- 再检查对应 transcript 的 `.gtrace` 是否持续增长但内容指纹没有变化；同一 `turnId` 的相同 fingerprint 不应再次上传
+- 再检查对应 transcript 的 `.gtrace` 是否持续增长；当前实现对 `completed` / `cancelled` 终态 turn 采用 `turnId` 去重，终态一旦写入 `.gtrace`，后续即使 fingerprint 漂移也不会再次上传
+- Stop hook 进入解析前会短暂等待 transcript 文件稳定，避免文件尾部尚未刷盘时把同一个已完成 turn 解析成不同 fingerprint

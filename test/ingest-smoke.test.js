@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +7,7 @@ import { after, before, test } from "node:test";
 
 import { createServer } from "../src/server.js";
 import { collectRollout } from "../src/codex-collector.js";
+import { buildCodexMetrics } from "../src/codex-metrics.js";
 import { parseSession } from "../src/codex-parse.js";
 import { encodeExportTraceServiceRequest } from "../src/proto.js";
 
@@ -122,9 +123,15 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   const sessionDir = path.join(home, "sessions");
   await mkdirp(path.join(home, ".codex"));
   await mkdirp(sessionDir);
+  const systemSkillFile = path.join(home, ".codex", "skills", ".system", "plugin-creator", "SKILL.md");
+  await writeSkillFile(systemSkillFile, {
+    name: "plugin-creator",
+    description: "Create and scaffold plugin directories for Codex.",
+    version: "2.1.0",
+  });
 
   const rollout = path.join(sessionDir, "rollout-basic-main.jsonl");
-  await writeFile(rollout, buildCodexRolloutFixture(), "utf-8");
+  await writeFile(rollout, buildCodexRolloutFixture({ systemSkillFile }), "utf-8");
   await writeFile(
     path.join(home, ".codex", "gtrace.json"),
     JSON.stringify(
@@ -222,7 +229,35 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.conversation.id"), "sess-basic");
   assert.equal(attrValue(uploadedSpans[0].attributes, "session_id"), "sess-basic");
   assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.agent.name"), "codex");
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.agent.version"), "0.123.0");
   assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.operation.name"), "invoke_agent");
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.output.type"), "json");
+  assert.deepEqual(attrValue(uploadedSpans[0].attributes, "gen_ai.response.finish_reasons"), ["stop"]);
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.request.choice.count"), 2);
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.request.seed"), 7);
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.request.temperature"), 0.2);
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.request.top_p"), 0.9);
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.request.max_tokens"), 512);
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.request.presence_penalty"), 0.3);
+  assert.equal(attrValue(uploadedSpans[0].attributes, "gen_ai.request.frequency_penalty"), 0.4);
+  assert.deepEqual(attrValue(uploadedSpans[0].attributes, "gen_ai.request.stop_sequences"), ["DONE"]);
+  assert.deepEqual(attrValue(uploadedSpans[0].attributes, "gen_ai.system_instructions"), [
+    { type: "text", content: "You are a file assistant." },
+    { type: "text", content: "Keep answers concise." },
+  ]);
+  assert.deepEqual(attrValue(uploadedSpans[0].attributes, "gen_ai.tool.definitions"), [
+    {
+      type: "function",
+      name: "exec_command",
+      description: "Run a shell command",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
+  ]);
   assert.equal(
     attrValue(uploadedSpans[0].attributes, "final_status"),
     "completed",
@@ -253,7 +288,9 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.ok(llmSpans.every((span) => spanEndNs(span) > spanStartNs(span)));
   assert.ok(llmSpans.every((span) => attrValue(span.attributes, "session_key") === undefined));
   assert.ok(llmSpans.every((span) => attrValue(span.attributes, "gen_ai.operation.name") === "chat"));
+  assert.ok(llmSpans.every((span) => attrValue(span.attributes, "gen_ai.output.type") === "json"));
   const firstLlm = llmSpans.find((span) => attrValue(span.attributes, "step_index") === 0);
+  assert.deepEqual(attrValue(firstLlm.attributes, "gen_ai.response.finish_reasons"), ["tool_call"]);
   assert.deepEqual(attrValue(firstLlm.attributes, "gen_ai.input.messages"), [
     {
       role: "user",
@@ -265,7 +302,12 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
       role: "assistant",
       parts: [
         { type: "reasoning", content: "I'll list files with ls." },
-        { type: "tool_call", name: "exec_command", id: "call-1", arguments: '{"command":["ls"]}' },
+        {
+          type: "tool_call",
+          name: "exec_command",
+          id: "call-1",
+          arguments: JSON.stringify({ command: ["sed", "-n", "1,120p", systemSkillFile] }),
+        },
       ],
       finish_reason: "tool_call",
     },
@@ -276,6 +318,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.input_tokens"), 150);
   assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.cache_read.input_tokens"), 50);
   assert.equal(attrValue(cachedLlm.attributes, "gen_ai.usage.output_tokens"), 30);
+  assert.deepEqual(attrValue(cachedLlm.attributes, "gen_ai.response.finish_reasons"), ["stop"]);
   assert.deepEqual(attrValue(cachedLlm.attributes, "gen_ai.input.messages"), [
     {
       role: "tool",
@@ -299,6 +342,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
 
   const assistantSpan = uploadedSpans.find((span) => span.name === "assistant");
   assert.equal(attrValue(assistantSpan.attributes, "role"), "assistant");
+  assert.equal(attrValue(assistantSpan.attributes, "gen_ai.output.type"), "text");
   assert.equal(
     attrValue(assistantSpan.attributes, "output_preview"),
     "There are two files: file1.txt and file2.txt.",
@@ -312,18 +356,51 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     "2026-06-03T10:00:04.300Z",
   );
 
-  const listed = await fetch(`${baseUrl}/traces?limit=5`).then((res) => res.json());
+  const listed = await fetch(`${baseUrl}/traces?limit=6`).then((res) => res.json());
   assert.deepEqual(
     listed.data.map((span) => span.gtrace.observation.type).sort(),
-    ["agent", "assistant", "llm", "llm", "tool"].sort(),
+    ["agent", "assistant", "llm", "llm", "skill", "tool"].sort(),
   );
+  const skillSpan = uploadedSpans.find((span) => span.name === "skill:plugin-creator");
+  assert.equal(attrValue(skillSpan.attributes, "gen_ai.operation.name"), "skill");
+  assert.equal(attrValue(skillSpan.attributes, "skill.name"), "plugin-creator");
+  assert.equal(attrValue(skillSpan.attributes, "gen_ai.skill.name"), "plugin-creator");
+  assert.equal(attrValue(skillSpan.attributes, "skill.source.type"), "system");
+  assert.equal(attrValue(skillSpan.attributes, "gen_ai.skill.source.type"), "system");
+  assert.equal(
+    attrValue(skillSpan.attributes, "skill.path"),
+    systemSkillFile,
+  );
+  assert.equal(attrValue(skillSpan.attributes, "gen_ai.skill.path"), systemSkillFile);
+  assert.equal(attrValue(skillSpan.attributes, "skill.result_status"), "completed");
+  assert.equal(attrValue(skillSpan.attributes, "gen_ai.skill.result.status"), "completed");
+  assert.equal(
+    attrValue(skillSpan.attributes, "gen_ai.skill.description"),
+    "Create and scaffold plugin directories for Codex.",
+  );
+  assert.equal(attrValue(skillSpan.attributes, "gen_ai.skill.version"), "2.1.0");
+  assert.ok(spanStartNs(skillSpan) >= spanStartNs(firstLlm));
+  assert.ok(spanEndNs(skillSpan) <= spanEndNs(firstLlm));
   const toolSpan = uploadedSpans.find((span) => span.name === "tool:exec_command");
-  assert.equal(attrValue(toolSpan.attributes, "tool_command"), "ls");
+  assert.equal(
+    attrValue(toolSpan.attributes, "tool_command"),
+    `sed -n 1,120p ${systemSkillFile}`,
+  );
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.operation.name"), "execute_tool");
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.name"), "exec_command");
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.id"), "call-1");
-  assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.arguments"), '{"command":["ls"]}');
+  assert.equal(attrValue(toolSpan.attributes, "skill.name"), "plugin-creator");
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.skill.name"), "plugin-creator");
+  assert.equal(attrValue(toolSpan.attributes, "skill.source.type"), "system");
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.skill.source.type"), "system");
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.skill.version"), "2.1.0");
+  assert.equal(
+    attrValue(toolSpan.attributes, "gen_ai.tool.call.arguments"),
+    JSON.stringify({ command: ["sed", "-n", "1,120p", systemSkillFile] }),
+  );
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.result"), "file1.txt file2.txt");
+  assert.equal(toolSpan.parent_id, firstLlm.span_id);
+  assert.equal(skillSpan.parent_id, toolSpan.span_id);
   assert.ok(spanEndNs(toolSpan) <= spanEndNs(cachedLlm));
   assert.equal(listed.data.at(-1).gtrace.trace.session_id, "sess-basic");
   assert.equal(
@@ -342,11 +419,12 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(metricResourceAttrs, "app_id"), "codex-monitor");
   assert.equal(attrValue(metricResourceAttrs, "app_name"), "Codex OTEL");
   assert.equal(metricsBatch.metrics[0].resource.app_id, "codex-monitor");
-  assert.equal(metricsBatch.metric_count, 8);
+  assert.equal(metricsBatch.metric_count, 13);
   assert.deepEqual(
     Array.from(new Set(metricsBatch.metrics.map((metric) => metric.name))).sort(),
     [
-      "gen_ai.client.operation.duration",
+      "gen_ai.agent.operation.count",
+      "gen_ai.agent.operation.duration",
       "gen_ai.client.token.usage",
       "gen_ai.workflow.duration",
     ],
@@ -355,7 +433,6 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_key === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.run_id === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_id === "sess-basic"));
-  assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.operation_name === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.token_type === undefined));
   assert.deepEqual(
     Array.from(
@@ -370,17 +447,73 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   const workflowDuration = metricsBatch.metrics.find((metric) => metric.name === "gen_ai.workflow.duration");
   assert.equal(workflowDuration.unit, "s");
   assert.equal(workflowDuration.sum, 3.4);
+  const skillWorkflow = metricsBatch.metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.workflow.duration" &&
+      metric.attributes["skill.name"] === "plugin-creator",
+  );
+  assert.equal(skillWorkflow, undefined);
+  const modelOperation = metricsBatch.metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.duration" &&
+      metric.attributes.operation_name === "model",
+  );
+  assert.equal(modelOperation.unit, "ms");
+  assert.equal(modelOperation.attributes["gen_ai.operation.name"], "chat");
+  assert.equal(modelOperation.attributes.provider_name, "openai");
+  assert.equal(modelOperation.attributes.request_model, "gpt-5.4");
+  assert.equal(modelOperation.attributes.response_model, "gpt-5.4");
+  const skillOperation = metricsBatch.metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.duration" &&
+      metric.attributes["gen_ai.operation.name"] === "skill" &&
+      metric.attributes.skill_name === "plugin-creator",
+  );
+  assert.equal(skillOperation.unit, "ms");
+  assert.equal(skillOperation.attributes.agent_runtime, "codex");
+  assert.equal(skillOperation.attributes.operation_name, "skill");
+  assert.equal(skillOperation.attributes.outcome, "completed");
+  assert.equal(skillOperation.attributes.skill_name, "plugin-creator");
+  assert.equal(skillOperation.attributes.skill_source, "system");
+  assert.equal(skillOperation.attributes["gen_ai.skill.name"], "plugin-creator");
+  assert.equal(skillOperation.attributes["gen_ai.skill.source.type"], "system");
+  assert.equal(skillOperation.attributes["gen_ai.skill.result.status"], "completed");
+  assert.equal(skillOperation.attributes["gen_ai.skill.version"], "2.1.0");
+  const skillOperationCount = metricsBatch.metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.count" &&
+      metric.attributes.operation_name === "skill" &&
+      metric.attributes.skill_name === "plugin-creator",
+  );
+  assert.equal(skillOperationCount.value, 1);
+  assert.equal(skillOperationCount.attributes.skill_source, "system");
   const toolOperation = metricsBatch.metrics.find(
     (metric) =>
-      metric.name === "gen_ai.client.operation.duration" &&
+      metric.name === "gen_ai.agent.operation.duration" &&
       metric.attributes["gen_ai.operation.name"] === "execute_tool",
   );
-  assert.equal(toolOperation.unit, "s");
+  assert.equal(toolOperation.unit, "ms");
+  assert.equal(toolOperation.attributes.operation_name, "tool");
+  assert.equal(toolOperation.attributes.outcome, "completed");
+  assert.equal(toolOperation.attributes.tool_name, "exec_command");
   assert.equal(toolOperation.attributes["gen_ai.tool.name"], "exec_command");
+  assert.equal(toolOperation.attributes.skill_name, "plugin-creator");
+  assert.equal(toolOperation.attributes["gen_ai.skill.name"], "plugin-creator");
+  assert.equal(toolOperation.attributes.skill_source, "system");
   assert.equal(toolOperation.attributes.tool_result_status, "completed");
+  const toolOperationCount = metricsBatch.metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.count" &&
+      metric.attributes.operation_name === "tool" &&
+      metric.attributes.tool_name === "exec_command",
+  );
+  assert.equal(toolOperationCount.value, 1);
+  assert.equal(toolOperationCount.attributes.skill_name, "plugin-creator");
 
   const listedMetrics = await fetch(`${baseUrl}/metrics?limit=20`).then((res) => res.json());
   assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.client.token.usage"));
+  assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.agent.operation.count"));
+  assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.agent.operation.duration"));
 });
 
 test("concurrent Codex hooks only upload one copy for the same transcript", async () => {
@@ -448,7 +581,7 @@ test("concurrent Codex hooks only upload one copy for the same transcript", asyn
   await assert.rejects(stat(`${rollout}.gtrace.lock`), { code: "ENOENT" });
 });
 
-test("sequential Codex hooks do not re-upload an unchanged incomplete turn", async () => {
+test("sequential Codex hooks skip incomplete turns and upload once after completion", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "gtrace-hook-open-home-"));
   const sessionDir = path.join(home, "sessions");
   await mkdirp(path.join(home, ".codex"));
@@ -537,9 +670,56 @@ test("sequential Codex hooks do not re-upload an unchanged incomplete turn", asy
 
   assert.equal(first.status, 0, first.stderr);
   assert.equal(second.status, 0, second.stderr);
+  assert.equal(await countBatches((batch) => batch.span_count > 0), beforeTraceBatches);
+  assert.equal(await countBatches((batch) => batch.metric_count > 0), beforeMetricBatches);
+  await assert.rejects(stat(`${rollout}.gtrace`), { code: "ENOENT" });
+
+  await appendFile(
+    rollout,
+    `${[
+      row("2026-06-03T10:00:02.300Z", "event_msg", {
+        type: "agent_message",
+        message: "Current status is healthy.",
+      }),
+      row("2026-06-03T10:00:02.400Z", "event_msg", {
+        type: "task_complete",
+      }),
+    ].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    "utf-8",
+  );
+
+  const third = await spawnHook(process.execPath, ["src/codex-hook-wrapper.js"], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    input: hookPayload,
+    env,
+  });
+  const fourth = await spawnHook(process.execPath, ["src/codex-hook-wrapper.js"], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    input: hookPayload,
+    env,
+  });
+
+  assert.equal(third.status, 0, third.stderr);
+  assert.equal(fourth.status, 0, fourth.stderr);
   assert.equal(await countBatches((batch) => batch.span_count > 0), beforeTraceBatches + 1);
   assert.equal(await countBatches((batch) => batch.metric_count > 0), beforeMetricBatches + 1);
   assert.match(await readFile(`${rollout}.gtrace`, "utf-8"), /^turn-open\t[0-9a-f]+\n$/);
+});
+
+test("Codex collector does not reupload completed turns after sidecar fingerprint drift", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "gtrace-sidecar-dedupe-"));
+  const sessionDir = path.join(home, "sessions");
+  await mkdirp(path.join(home, ".codex"));
+  await mkdirp(sessionDir);
+
+  const rollout = path.join(sessionDir, "rollout-sidecar-dedupe.jsonl");
+  await writeFile(rollout, buildCodexRolloutFixture(), "utf-8");
+  await writeFile(`${rollout}.gtrace`, "turn-1\tdeadbeef\n", "utf-8");
+
+  const result = await collectRollout(rollout, { max_chars: 4096 });
+  assert.equal(result.turns.length, 1);
+  assert.equal(result.spans.length, 0);
+  assert.deepEqual(result.uploadedTurnStates, []);
 });
 
 test("Codex parser infers completed status when Stop hook runs before task_complete is written", () => {
@@ -737,6 +917,190 @@ test("Codex parser deduplicates repeated tool calls with the same call_id", () =
   assert.equal(turns[0].steps[0].toolCalls[0].callId, "call-duplicate");
   assert.deepEqual(turns[0].steps[0].toolCalls[0].args, { cmd: "npm test" });
   assert.equal(turns[0].steps[0].toolCalls[0].endTime, Date.parse("2026-06-03T10:00:02.300Z"));
+});
+
+test("Codex collector nests skill span under tool span while keeping assistant spans", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "gtrace-skill-order-"));
+  const sessionDir = path.join(home, "sessions");
+  await mkdirp(path.join(home, ".codex"));
+  await mkdirp(sessionDir);
+  const userSkillFile = path.join(home, ".codex", "skills", "dashboard", "SKILL.md");
+  await writeSkillFile(userSkillFile, {
+    name: "dashboard",
+    description: "生成观测云 Dashboard 仪表板。",
+    version: "1.4.0",
+  });
+
+  const rollout = path.join(sessionDir, "rollout-skill-order.jsonl");
+  await writeFile(
+    rollout,
+    `${[
+      row("2026-06-03T10:00:00.000Z", "session_meta", {
+        id: "sess-skill-order",
+        cli_version: "0.140.0",
+        model_provider: "openai",
+      }),
+      row("2026-06-03T10:00:01.000Z", "event_msg", {
+        type: "task_started",
+        turn_id: "turn-skill-order",
+      }),
+      row("2026-06-03T10:00:01.100Z", "turn_context", {
+        model: "gpt-5.4",
+      }),
+      row("2026-06-03T10:00:01.200Z", "event_msg", {
+        type: "user_message",
+        message: "Build a dashboard",
+      }),
+      row("2026-06-03T10:00:02.000Z", "response_item", {
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "output_text",
+            text: "我先读取 dashboard skill 的说明，然后再继续。",
+          },
+        ],
+      }),
+      row("2026-06-03T10:00:02.050Z", "response_item", {
+        type: "function_call",
+        name: "exec_command",
+        call_id: "call-skill-order",
+        arguments: JSON.stringify({
+          command: ["sed", "-n", "1,80p", userSkillFile],
+        }),
+      }),
+      row("2026-06-03T10:00:02.200Z", "event_msg", {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 20,
+            output_tokens: 6,
+            total_tokens: 26,
+          },
+        },
+      }),
+      row("2026-06-03T10:00:02.500Z", "event_msg", {
+        type: "exec_command_end",
+        call_id: "call-skill-order",
+        status: "completed",
+        stdout: "dashboard skill",
+      }),
+      row("2026-06-03T10:00:03.000Z", "response_item", {
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "output_text",
+            text: "我已经读完 skill 说明。",
+          },
+        ],
+      }),
+      row("2026-06-03T10:00:03.100Z", "event_msg", {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 30,
+            output_tokens: 10,
+            total_tokens: 40,
+          },
+        },
+      }),
+      row("2026-06-03T10:00:03.200Z", "event_msg", {
+        type: "agent_message",
+        message: "我已经读完 skill 说明。",
+      }),
+      row("2026-06-03T10:00:03.300Z", "event_msg", {
+        type: "task_complete",
+      }),
+    ].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    "utf-8",
+  );
+
+  const result = await collectRollout(rollout, { max_chars: 4096 });
+  const assistantSpans = result.spans.filter((span) => span.name === "assistant");
+  assert.equal(assistantSpans.length, 2);
+  assert.equal(assistantSpans[0].attributes.output_preview, "我先读取 dashboard skill 的说明，然后再继续。");
+  assert.equal(assistantSpans[1].attributes.output_preview, "我已经读完 skill 说明。");
+
+  const skillSpan = result.spans.find((span) => span.name === "skill:dashboard");
+  const toolSpan = result.spans.find((span) => span.name === "tool:exec_command");
+  const firstLlm = result.spans.find(
+    (span) => span.name === "llm" && span.attributes.step_index === 0,
+  );
+  assert.ok(skillSpan);
+  assert.ok(toolSpan);
+  assert.ok(firstLlm);
+  assert.equal(toolSpan.parent_id, firstLlm.span_id);
+  assert.equal(skillSpan.parent_id, toolSpan.span_id);
+  assert.equal(skillSpan.attributes["gen_ai.skill.name"], "dashboard");
+  assert.equal(skillSpan.attributes["gen_ai.skill.description"], "生成观测云 Dashboard 仪表板。");
+  assert.equal(skillSpan.attributes["gen_ai.skill.version"], "1.4.0");
+  assert.equal(skillSpan.attributes["gen_ai.skill.path"], userSkillFile);
+  assert.equal(skillSpan.attributes["gen_ai.skill.source.type"], "user");
+  assert.equal(skillSpan.attributes["gen_ai.skill.result.status"], "completed");
+  assert.equal(toolSpan.attributes["gen_ai.skill.name"], "dashboard");
+  assert.equal(toolSpan.attributes["gen_ai.skill.version"], "1.4.0");
+
+  const metrics = buildCodexMetrics(result.spans);
+  const skillWorkflow = metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.workflow.duration" &&
+      metric.attributes["gen_ai.operation.name"] === "skill" &&
+      metric.attributes["skill.name"] === "dashboard",
+  );
+  const toolOperation = metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.duration" &&
+      metric.attributes["gen_ai.operation.name"] === "execute_tool" &&
+      metric.attributes.skill_name === "dashboard",
+  );
+  const skillOperation = metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.duration" &&
+      metric.attributes["gen_ai.operation.name"] === "skill" &&
+      metric.attributes.skill_name === "dashboard",
+  );
+  const toolOperationCount = metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.count" &&
+      metric.attributes.operation_name === "tool" &&
+      metric.attributes.skill_name === "dashboard",
+  );
+  const skillOperationCount = metrics.find(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.count" &&
+      metric.attributes.operation_name === "skill" &&
+      metric.attributes.skill_name === "dashboard",
+  );
+  assert.equal(skillWorkflow, undefined);
+  assert.ok(skillOperation);
+  assert.equal(skillOperation.unit, "ms");
+  assert.equal(skillOperation.attributes.operation_name, "skill");
+  assert.equal(skillOperation.attributes.skill_name, "dashboard");
+  assert.equal(skillOperation.attributes.skill_source, "user");
+  assert.equal(skillOperation.attributes.outcome, "completed");
+  assert.equal(skillOperation.attributes["gen_ai.skill.name"], "dashboard");
+  assert.equal(skillOperation.attributes["gen_ai.skill.source.type"], "user");
+  assert.equal(skillOperation.attributes["gen_ai.skill.result.status"], "completed");
+  assert.equal(skillOperation.attributes["gen_ai.skill.version"], "1.4.0");
+  assert.ok(skillOperationCount);
+  assert.equal(skillOperationCount.value, 1);
+  assert.equal(skillOperationCount.attributes.skill_source, "user");
+  assert.ok(toolOperation);
+  assert.equal(toolOperation.unit, "ms");
+  assert.equal(toolOperation.attributes.operation_name, "tool");
+  assert.equal(toolOperation.attributes.tool_name, "exec_command");
+  assert.equal(toolOperation.attributes.skill_name, "dashboard");
+  assert.equal(toolOperation.attributes.skill_source, "user");
+  assert.equal(toolOperation.attributes.outcome, "completed");
+  assert.equal(toolOperation.attributes["gen_ai.skill.name"], "dashboard");
+  assert.equal(toolOperation.attributes["gen_ai.skill.source.type"], "user");
+  assert.equal(toolOperation.attributes["gen_ai.skill.result.status"], "completed");
+  assert.equal(toolOperation.attributes["gen_ai.skill.version"], "1.4.0");
+  assert.equal(toolOperation.attributes.tool_result_status, "completed");
+  assert.ok(toolOperationCount);
+  assert.equal(toolOperationCount.value, 1);
+  assert.equal(toolOperationCount.attributes.skill_name, "dashboard");
 });
 
 test("Codex collector skips blank turns that only contain startup context", async () => {
@@ -957,7 +1321,9 @@ function attr(key, value) {
   };
 }
 
-function buildCodexRolloutFixture() {
+function buildCodexRolloutFixture(options = {}) {
+  const systemSkillFile =
+    options.systemSkillFile ?? "/home/liurui/.codex/skills/.system/plugin-creator/SKILL.md";
   const rows = [
     row("2026-06-03T10:00:00.000Z", "session_meta", {
       id: "sess-basic",
@@ -965,6 +1331,9 @@ function buildCodexRolloutFixture() {
       model_provider: "openai",
       timestamp: "2026-06-03T09:59:58.000Z",
       source: "cli",
+      base_instructions: {
+        text: "You are a file assistant.",
+      },
     }),
     row("2026-06-03T10:00:01.000Z", "event_msg", {
       type: "task_started",
@@ -972,6 +1341,33 @@ function buildCodexRolloutFixture() {
     }),
     row("2026-06-03T10:00:01.100Z", "turn_context", {
       model: "gpt-5.4",
+      response_format: { type: "json_object" },
+      n: 2,
+      seed: 7,
+      temperature: 0.2,
+      top_p: 0.9,
+      max_output_tokens: 512,
+      presence_penalty: 0.3,
+      frequency_penalty: 0.4,
+      stop_sequences: ["DONE"],
+      tools: [
+        {
+          type: "function",
+          name: "exec_command",
+          description: "Run a shell command",
+          parameters: {
+            type: "object",
+            properties: {
+              command: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+      ],
+      collaboration_mode: {
+        settings: {
+          developer_instructions: "Keep answers concise.",
+        },
+      },
     }),
     row("2026-06-03T10:00:01.200Z", "event_msg", {
       type: "user_message",
@@ -985,7 +1381,9 @@ function buildCodexRolloutFixture() {
       type: "function_call",
       name: "exec_command",
       call_id: "call-1",
-      arguments: JSON.stringify({ command: ["ls"] }),
+      arguments: JSON.stringify({
+        command: ["sed", "-n", "1,120p", systemSkillFile],
+      }),
     }),
     row("2026-06-03T10:00:02.600Z", "event_msg", {
       type: "token_count",
@@ -1045,6 +1443,26 @@ function row(timestamp, type, payload) {
 
 async function mkdirp(dir) {
   await import("node:fs/promises").then((fs) => fs.mkdir(dir, { recursive: true }));
+}
+
+async function writeSkillFile(skillFile, fields) {
+  await mkdirp(path.dirname(skillFile));
+  await writeFile(
+    skillFile,
+    [
+      "---",
+      `name: ${fields.name}`,
+      `description: ${fields.description}`,
+      ...(fields.version ? [`version: ${fields.version}`] : []),
+      "---",
+      "",
+      `# ${fields.name}`,
+      "",
+      fields.description,
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
 }
 
 function spawnHook(command, args, options) {

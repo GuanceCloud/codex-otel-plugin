@@ -373,6 +373,8 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   );
   assert.equal(attrValue(skillSpan.attributes, "gen_ai.skill.path"), systemSkillFile);
   assert.equal(attrValue(skillSpan.attributes, "skill.result_status"), "completed");
+  assert.equal(attrValue(skillSpan.attributes, "skill_call_id"), "call-1");
+  assert.equal(attrValue(skillSpan.attributes, "skill.description"), "Create and scaffold plugin directories for Codex.");
   assert.equal(attrValue(skillSpan.attributes, "gen_ai.skill.result.status"), "completed");
   assert.equal(
     attrValue(skillSpan.attributes, "gen_ai.skill.description"),
@@ -389,6 +391,8 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.operation.name"), "execute_tool");
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.name"), "exec_command");
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.id"), "call-1");
+  assert.equal(attrValue(toolSpan.attributes, "skill_call_id"), "call-1");
+  assert.equal(attrValue(toolSpan.attributes, "skill.description"), "Create and scaffold plugin directories for Codex.");
   assert.equal(attrValue(toolSpan.attributes, "skill.name"), "plugin-creator");
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.skill.name"), "plugin-creator");
   assert.equal(attrValue(toolSpan.attributes, "skill.source.type"), "system");
@@ -479,6 +483,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(skillOperation.attributes["gen_ai.skill.source.type"], "system");
   assert.equal(skillOperation.attributes["gen_ai.skill.result.status"], "completed");
   assert.equal(skillOperation.attributes["gen_ai.skill.version"], "2.1.0");
+  assert.equal(skillOperation.attributes.skill_call_id, undefined);
   const skillOperationCount = metricsBatch.metrics.find(
     (metric) =>
       metric.name === "gen_ai.agent.operation.count" &&
@@ -1038,8 +1043,12 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(skillSpan.attributes["gen_ai.skill.path"], userSkillFile);
   assert.equal(skillSpan.attributes["gen_ai.skill.source.type"], "user");
   assert.equal(skillSpan.attributes["gen_ai.skill.result.status"], "completed");
+  assert.equal(skillSpan.attributes.skill_call_id, "call-skill-order");
+  assert.equal(skillSpan.attributes["skill.description"], "生成观测云 Dashboard 仪表板。");
   assert.equal(toolSpan.attributes["gen_ai.skill.name"], "dashboard");
   assert.equal(toolSpan.attributes["gen_ai.skill.version"], "1.4.0");
+  assert.equal(toolSpan.attributes.skill_call_id, "call-skill-order");
+  assert.equal(toolSpan.attributes["skill.description"], "生成观测云 Dashboard 仪表板。");
 
   const metrics = buildCodexMetrics(result.spans);
   const skillWorkflow = metrics.find(
@@ -1083,6 +1092,7 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(skillOperation.attributes["gen_ai.skill.source.type"], "user");
   assert.equal(skillOperation.attributes["gen_ai.skill.result.status"], "completed");
   assert.equal(skillOperation.attributes["gen_ai.skill.version"], "1.4.0");
+  assert.equal(skillOperation.attributes.skill_call_id, undefined);
   assert.ok(skillOperationCount);
   assert.equal(skillOperationCount.value, 1);
   assert.equal(skillOperationCount.attributes.skill_source, "user");

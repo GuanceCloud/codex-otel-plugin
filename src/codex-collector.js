@@ -27,7 +27,9 @@ const ATTR = {
   requestTopP: "gen_ai.request.top_p",
   responseFinishReasons: "gen_ai.response.finish_reasons",
   responseModel: "gen_ai.response.model",
+  skillDescriptionCompat: "skill.description",
   skillDescription: "gen_ai.skill.description",
+  skillCallId: "skill_call_id",
   systemInstructions: "gen_ai.system_instructions",
   skillNameGenAi: "gen_ai.skill.name",
   skillName: "skill.name",
@@ -628,17 +630,20 @@ async function populateTurnSkillMetadata(turn, cache) {
   }
 }
 
-function setSkillAttributes(attributes, skill, metadata, resultStatus, maxChars) {
+function setSkillAttributes(attributes, skill, metadata, resultStatus, skillCallId, maxChars) {
+  const description = preview(metadata?.description, maxChars);
   setAttr(attributes, ATTR.skillName, skill?.skillName);
+  setAttr(attributes, ATTR.skillDescriptionCompat, description);
   setAttr(attributes, ATTR.skillPath, skill?.skillFile);
   setAttr(attributes, ATTR.skillSourceType, skill?.skillSourceType);
   setAttr(attributes, ATTR.skillResultStatus, resultStatus);
+  setAttr(attributes, ATTR.skillCallId, skill ? skillCallId : undefined);
 
   setAttr(attributes, ATTR.skillNameGenAi, skill?.skillName);
   setAttr(attributes, ATTR.skillPathGenAi, skill?.skillFile);
   setAttr(attributes, ATTR.skillSourceTypeGenAi, skill?.skillSourceType);
   setAttr(attributes, ATTR.skillResultStatusGenAi, resultStatus);
-  setAttr(attributes, ATTR.skillDescription, preview(metadata?.description, maxChars));
+  setAttr(attributes, ATTR.skillDescription, description);
   setAttr(attributes, ATTR.skillVersion, metadata?.version);
 }
 
@@ -876,6 +881,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
         skill,
         skillMetadata,
         skill ? (tc.error ? "error" : "completed") : undefined,
+        tc.callId,
         maxChars,
       );
       setAttr(toolAttributes, "tool_result_status", tc.error ? "error" : "completed");
@@ -906,7 +912,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       setAttr(skillAttributes, ATTR.operationName, "skill");
       setAttr(skillAttributes, ATTR.providerName, sessionMeta.modelProvider);
       setModelAttrs(skillAttributes, turn.model);
-      setSkillAttributes(skillAttributes, skill, skillMetadata, tc.error ? "error" : "completed", maxChars);
+      setSkillAttributes(skillAttributes, skill, skillMetadata, tc.error ? "error" : "completed", tc.callId, maxChars);
       setAttr(skillAttributes, "tool_count", 1);
       setAttr(skillAttributes, "input_preview", preview(skill.skillFile, maxChars));
       setAttr(skillAttributes, "output_preview", preview(toText(tc.output), maxChars));

@@ -60,7 +60,7 @@ npm ls --all
 当前目标是无运行时 npm 第三方依赖，`npm ls --all` 应保持：
 
 ```text
-gtrace@0.1.3 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.4 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 
@@ -152,6 +152,7 @@ docs/traces.md
 - 停止原因使用 `gen_ai.response.finish_reasons`
 - 系统指令和工具定义使用 `gen_ai.system_instructions`、`gen_ai.tool.definitions`
 - 会话字段使用 `gen_ai.conversation.id`，并兼容保留 `session_id`
+- `llm` span 额外保留 `ttft`，单位毫秒
 - 结构化消息字段使用 `gen_ai.input.messages` 和 `gen_ai.output.messages`
 - 工具字段使用 `gen_ai.tool.*`
 - skill 字段当前同时保留兼容 `skill.*`，并补充项目扩展 `gen_ai.skill.*`；其中 `description`、`version` 仅在能从 skill 元数据稳定提取时生成，`skill.description` / `skill_call_id` 仅保留在 trace attributes 中
@@ -168,6 +169,8 @@ Token 口径：
 - `gen_ai.usage.reasoning.output_tokens`: 模型服务端返回的 reasoning token 明细
 
 `llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`invoke_agent` span 上的 `gen_ai.usage.*` 表示当前 turn 汇总；`assistant` span 不携带 token usage，避免重复计算 token。
+
+`llm` span 的 duration 包含首 token 等待时间；等待值单独保留在 `ttft` 字段中。
 
 ## 状态逻辑
 

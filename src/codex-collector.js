@@ -663,6 +663,13 @@ function latestStepChildEndTime(step) {
   return Math.max(step.endTime, ...assistantEnds, ...toolEnds);
 }
 
+function llmRequestStartTime(turn, steps, index) {
+  if (index <= 0) return turn.startTime;
+  const previousStep = steps[index - 1];
+  if (!previousStep) return turn.startTime;
+  return latestStepChildEndTime(previousStep);
+}
+
 function commonAttributes(config, sessionMeta) {
   const attributes = {
     [ATTR.agentName]: "codex",
@@ -764,6 +771,11 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     const generationSpanId = randomSpanId();
     const { toolCallToSkill } = buildSkillContexts(step.toolCalls);
     const usage = usageDetails(step.usage);
+    const llmRequestStart = llmRequestStartTime(turn, turn.steps, index);
+    const ttft =
+      Number.isFinite(llmRequestStart) && Number.isFinite(step.startTime) && step.startTime >= llmRequestStart
+        ? step.startTime - llmRequestStart
+        : 0;
     const llmEndTime = latestStepChildEndTime(step);
     const generationInput = index === 0 ? clipValue(turn.userInput, maxChars) : previousToolResults;
     const generationOutput = buildGenerationOutput(step, maxChars);
@@ -801,6 +813,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     setAttr(attributes, "output_kind", step.toolCalls.length > 0 ? "tool_call" : "text");
     setUsageAttrs(attributes, usage);
     setAttr(attributes, "step_index", index);
+    setAttr(attributes, "ttft", ttft);
     setAttr(attributes, "status", "ok");
 
     spans.push(
@@ -809,7 +822,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
         spanId: generationSpanId,
         parentId: rootSpanId,
         name: "llm",
-        start: step.startTime,
+        start: ttft > 0 ? llmRequestStart : step.startTime,
         end: llmEndTime,
         attributes,
         resource,

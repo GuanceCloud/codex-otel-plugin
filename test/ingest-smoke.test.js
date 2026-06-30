@@ -290,6 +290,13 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.ok(llmSpans.every((span) => attrValue(span.attributes, "gen_ai.operation.name") === "chat"));
   assert.ok(llmSpans.every((span) => attrValue(span.attributes, "gen_ai.output.type") === "json"));
   const firstLlm = llmSpans.find((span) => attrValue(span.attributes, "step_index") === 0);
+  const secondLlm = llmSpans.find((span) => attrValue(span.attributes, "step_index") === 1);
+  assert.ok(firstLlm);
+  assert.ok(secondLlm);
+  assert.equal(attrValue(firstLlm.attributes, "ttft"), 1000);
+  assert.equal(attrValue(secondLlm.attributes, "ttft"), 900);
+  assert.equal(Number(spanEndNs(firstLlm) - spanStartNs(firstLlm)) / 1_000_000, 2100);
+  assert.equal(Number(spanEndNs(secondLlm) - spanStartNs(secondLlm)) / 1_000_000, 1200);
   assert.deepEqual(attrValue(firstLlm.attributes, "gen_ai.response.finish_reasons"), ["tool_call"]);
   assert.deepEqual(attrValue(firstLlm.attributes, "gen_ai.input.messages"), [
     {

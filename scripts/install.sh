@@ -603,13 +603,11 @@ EOF
 fi
 
 remove_conflicting_plugins() {
-  local selectors
-  mapfile -t selectors < <("$NODE_BIN" -e 'for (const item of JSON.parse(process.argv[1] || "[]")) process.stdout.write(String(item) + "\n")' "$CONFLICTING_PLUGIN_SELECTORS_JSON")
   local selector
-  for selector in "${selectors[@]}"; do
+  while IFS= read -r selector; do
     [[ -n "$selector" ]] || continue
     codex plugin remove "$selector" >/dev/null 2>&1 || true
-  done
+  done < <("$NODE_BIN" -e 'for (const item of JSON.parse(process.argv[1] || "[]")) process.stdout.write(String(item) + "\n")' "$CONFLICTING_PLUGIN_SELECTORS_JSON")
 }
 
 remove_conflicting_plugins

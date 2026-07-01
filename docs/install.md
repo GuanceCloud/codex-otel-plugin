@@ -78,7 +78,7 @@ cat ~/.codex/gtrace.json
 - `codex plugin list` 中存在 `tracing@codex-otel-plugin`，状态为 `installed, enabled`
 - 如果本机装过 `codex-observability-plugin`，其 `tracing` 插件应已被移除
 - `codex plugin marketplace list` 中存在 `codex-otel-plugin`
-- cache 目录中存在版本目录，例如 `~/.codex/plugins/cache/codex-otel-plugin/tracing/0.1.4`
+- cache 目录中存在版本目录，例如 `~/.codex/plugins/cache/codex-otel-plugin/tracing/0.1.5`
 - `~/.codex/gtrace.json` 中包含 `endpoint`、`tracePath`、`metricsPath`、`headers.X-Token`
 
 ## 升级
@@ -96,7 +96,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 
 ```bash
 curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
-  | bash -s -- v0.1.4
+  | bash -s -- v0.1.5
 ```
 
 如果需要指定自定义 release 资产地址，可以覆盖下载 URL：

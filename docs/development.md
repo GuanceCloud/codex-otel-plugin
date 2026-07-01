@@ -63,7 +63,7 @@ npm ls --all
 ```
 
 ```text
-gtrace@0.1.4 /home/liurui/code/codex-otel-plugin
+gtrace@0.1.5 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 

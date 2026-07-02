@@ -441,6 +441,12 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
       "gen_ai.workflow.duration",
     ],
   );
+  const rawOperationCountMetric = metricsBatch.raw_request.resourceMetrics[0].scopeMetrics[0].metrics.find(
+    (metric) => metric.name === "gen_ai.agent.operation.count",
+  );
+  assert.ok(rawOperationCountMetric?.sum);
+  assert.equal(rawOperationCountMetric.sum.dataPoints[0].asDouble, 1);
+  assert.equal(rawOperationCountMetric.sum.dataPoints[0].asInt, undefined);
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes["gen_ai.conversation.id"] === "sess-basic"));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_key === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.run_id === undefined));

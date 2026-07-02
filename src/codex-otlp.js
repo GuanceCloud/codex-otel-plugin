@@ -154,14 +154,15 @@ function histogramDataPoint(metric, format) {
   };
 }
 
-function numberDataPoint(metric, format) {
+function numberDataPoint(metric, format, options = {}) {
   const value = Number(metric.value);
+  const preferDouble = options.preferDouble === true;
   return {
     attributes: attributesToOtlp(metric.attributes, format),
     startTimeUnixNano: metric.start_time_unix_nano,
     timeUnixNano: metric.time_unix_nano,
-    asInt: Number.isInteger(value) ? String(value) : undefined,
-    asDouble: Number.isInteger(value) ? undefined : value,
+    asInt: !preferDouble && Number.isInteger(value) ? String(value) : undefined,
+    asDouble: preferDouble || !Number.isInteger(value) ? value : undefined,
   };
 }
 
@@ -173,7 +174,7 @@ function codexMetricToOtlp(metric, format) {
   };
   if (metric.type === "sum") {
     out.sum = {
-      dataPoints: [numberDataPoint(metric, format)],
+      dataPoints: [numberDataPoint(metric, format, { preferDouble: true })],
       aggregationTemporality: "AGGREGATION_TEMPORALITY_DELTA",
       isMonotonic: true,
     };

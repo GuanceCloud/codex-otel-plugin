@@ -38,6 +38,25 @@ POST <endpoint>/<metricsPath>
 | `gen_ai.agent.operation.duration` | Histogram | `ms` | `llm`、`skill:*`、`tool:*` span duration | Agent 侧 operation 耗时统计。 |
 | `gen_ai.client.token.usage` | Histogram | `{token}` | `llm` span 的 `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` | 模型调用输入、输出 token 用量。 |
 
+`gen_ai.agent.operation.count` 和 `gen_ai.agent.operation.duration` 当前只覆盖三类 operation：
+
+- `llm`
+- `skill:*`
+- `tool:*`
+
+对应维度映射：
+
+- `llm` -> `operation_name=model`，`gen_ai.operation.name=chat`
+- `skill:*` -> `operation_name=skill`，`gen_ai.operation.name=skill`
+- `tool:*` -> `operation_name=tool`，`gen_ai.operation.name=execute_tool`
+
+当前不包含：
+
+- `invoke_agent`
+- `assistant`
+
+其中 `invoke_agent` 只生成 `gen_ai.workflow.duration`；`assistant` 不生成 operation count / duration 或 token usage。
+
 当前不生成：
 
 - `gen_ai.client.operation.time_to_first_chunk`: Codex rollout 当前没有稳定首 chunk 时间来源。

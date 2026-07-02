@@ -57,6 +57,8 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 安装完成后重启 Codex，让 Stop hook 重新加载。
 如果本机同时安装过 `codex-observability-plugin`，安装器会自动移除它的 `tracing` 插件并清掉残留配置，避免同一份 transcript 被重复上报。
 
+如果接收端偶发较慢，运行时单次 OTLP HTTP 请求默认超时为 `25000ms`；可在 `~/.codex/gtrace.json` 里通过 `timeout_ms` 调整。
+
 更多安装、升级、卸载和参数说明见 [docs/install.md](docs/install.md)。
 
 ## 文档导航

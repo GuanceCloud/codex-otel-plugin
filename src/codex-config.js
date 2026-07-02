@@ -141,6 +141,7 @@ export function resolveConfig(options = {}) {
       ...(tagsToResourceAttributes(tags) ?? {}),
       ...(configuredResourceAttributes ?? {}),
     },
+    timeout_ms: parseInteger(merged.timeout_ms) ?? 25_000,
     max_chars: parseInteger(merged.max_chars) ?? 20_000,
     debug: parseBoolean(merged.debug) ?? false,
     fail_on_error: parseBoolean(merged.fail_on_error) ?? false,

@@ -8,6 +8,29 @@ import { acquireRolloutLock, markTurnUploaded, releaseRolloutLock } from "./code
 import { readStdin } from "./codex-utils.js";
 import { encodeExportMetricsServiceRequest, encodeExportTraceServiceRequest } from "./proto.js";
 
+function safeResolveConfig() {
+  try {
+    return resolveConfig();
+  } catch {
+    return {
+      debug: false,
+      fail_on_error: false,
+      hook_log_file: process.env.HOME
+        ? `${process.env.HOME}/.codex/gtrace-hook.log`
+        : ".codex/gtrace-hook.log",
+    };
+  }
+}
+
+function errorMessage(error) {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function errorStack(error) {
+  return error instanceof Error && error.stack ? error.stack : undefined;
+}
+
 function resolveOtelUrl(endpoint, path) {
   const normalizedPath = String(path ?? "").trim().replace(/^\/+/, "").replace(/\/+$/, "");
   if (!normalizedPath) return endpoint;
@@ -77,7 +100,7 @@ async function upload(config, signal, body) {
   const auth = authHeader(config);
   if (auth && !headers.authorization && !headers.Authorization) headers.authorization = auth;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.timeout_ms ?? 10_000);
+  const timeout = setTimeout(() => controller.abort(), config.timeout_ms ?? 25_000);
   const url = endpoint(config, signal);
   try {
     const response = await fetch(url, {
@@ -110,9 +133,25 @@ async function uploadMetrics(config, metrics) {
   return upload(config, "metrics", encodeExportMetricsServiceRequest(codexMetricsToOtlpProtobufRequest(metrics)));
 }
 
+async function handleHookFailure(error, config = safeResolveConfig(), extra = {}) {
+  const message = errorMessage(error);
+  await appendLog(config, "failed", {
+    error: message,
+    ...(Object.keys(extra).length > 0 ? extra : {}),
+    ...(config.debug && errorStack(error) ? { stack: errorStack(error) } : {}),
+  });
+  if (config.debug) console.error("[gtrace-codex-hook] failed:", message);
+  if (config.fail_on_error) process.exitCode = 1;
+}
+
 export async function runHook(options = {}) {
-  const hookInput = options.hookInput ?? (await readStdin());
   const config = options.config ?? resolveConfig();
+  const hookInput = options.hookInput ?? (await readStdin());
+  await appendLog(config, "hook invoked", {
+    pid: process.pid,
+    cwd: process.cwd(),
+    transcript_path: hookInput.transcript_path ?? null,
+  });
   if (!config.enabled) {
     await appendLog(config, "gtrace disabled");
     return;
@@ -159,11 +198,13 @@ export async function runHook(options = {}) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  process.on("unhandledRejection", (error) => {
+    void handleHookFailure(error, safeResolveConfig(), { phase: "unhandledRejection" });
+  });
+  process.on("uncaughtException", (error) => {
+    void handleHookFailure(error, safeResolveConfig(), { phase: "uncaughtException" });
+  });
   runHook().catch(async (error) => {
-    const config = resolveConfig();
-    const message = error instanceof Error ? error.message : String(error);
-    await appendLog(config, "failed", { error: message });
-    if (config.debug) console.error("[gtrace-codex-hook] failed:", message);
-    if (config.fail_on_error) process.exitCode = 1;
+    await handleHookFailure(error, safeResolveConfig(), { phase: "runHook" });
   });
 }

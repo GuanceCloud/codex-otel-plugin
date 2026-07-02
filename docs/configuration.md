@@ -19,6 +19,7 @@ Codex hook 按以下顺序读取配置：
   "endpoint": "https://llm-openway.guance.com",
   "tracePath": "v1/write/otel-llm",
   "metricsPath": "v1/write/otel-metrics",
+  "timeout_ms": 25000,
   "headers": {
     "X-Token": "<token>",
     "To-Headless": "true"
@@ -44,6 +45,7 @@ Codex hook 按以下顺序读取配置：
   "endpoint": "http://localhost:3030",
   "tracePath": "api/public/otel/v1/traces",
   "metricsPath": "api/public/otel/v1/metrics",
+  "timeout_ms": 25000,
   "resourceAttributes": {
     "deployment.environment": "dev",
     "app_id": "codex-local"
@@ -61,6 +63,7 @@ Codex hook 按以下顺序读取配置：
   "enabled": true,
   "otel_traces_url": "http://localhost:4318/v1/traces",
   "otel_metrics_url": "http://localhost:4318/v1/metrics",
+  "timeout_ms": 25000,
   "debug": true
 }
 ```
@@ -73,6 +76,9 @@ Codex hook 按以下顺序读取配置：
 - `public_key`
 - `secret_key`
 - `resourceAttributes`
+- `timeout_ms`
+
+`timeout_ms` 是单次 HTTP 请求超时，默认 `25000` 毫秒。trace 和 metrics 分别各发一次请求；如果你的接收端链路较慢，可以显式调大。
 
 ## 认证
 

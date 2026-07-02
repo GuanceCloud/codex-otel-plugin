@@ -173,6 +173,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(await readFile(`${rollout}.gtrace`, "utf-8"), /turn-1/);
+  assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /hook invoked/);
   assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /uploaded spans/);
   assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /uploaded metrics/);
 
@@ -526,6 +527,43 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.client.token.usage"));
   assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.agent.operation.count"));
   assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.agent.operation.duration"));
+});
+
+test("native gtrace Codex hook logs stdin failures and keeps exit 0 by default", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "gtrace-hook-empty-stdin-"));
+  await mkdirp(path.join(home, ".codex"));
+  await writeFile(
+    path.join(home, ".codex", "gtrace.json"),
+    JSON.stringify(
+      {
+        enabled: true,
+        endpoint: baseUrl,
+        tracePath: "api/public/otel/v1/traces",
+        metricsPath: "api/public/otel/v1/metrics",
+        debug: true,
+        hook_log_file: path.join(home, ".codex", "gtrace-hook.log"),
+      },
+      null,
+      2,
+    ),
+  );
+
+  const result = await spawnHook(process.execPath, ["src/codex-hook-wrapper.js"], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    input: "",
+    env: {
+      ...process.env,
+      HOME: home,
+      CODEX_HOME: path.join(home, ".codex"),
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /empty hook stdin/);
+  const log = await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8");
+  assert.match(log, /"message":"failed"/);
+  assert.match(log, /empty hook stdin/);
+  assert.match(log, /"phase":"runHook"/);
 });
 
 test("concurrent Codex hooks only upload one copy for the same transcript", async () => {

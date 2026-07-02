@@ -347,7 +347,7 @@ cat > "$PLUGIN_ROOT/hooks/hooks.json" <<JSON
           {
             "type": "command",
             "command": "$HOOK_COMMAND",
-            "timeout": 30,
+            "timeout": 60,
             "statusMessage": "Uploading Codex trace to GTrace"
           }
         ]

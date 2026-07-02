@@ -1,12 +1,12 @@
-# Trace 字段说明
+# Trace Fields
 
-本文档说明 codex-otel-plugin 上报到 OTLP Trace 的 span 结构、字段命名、token 口径和 UI 展示建议。Metrics 指标体系见 [metrics.md](metrics.md)。
+This document describes the OTLP Trace model emitted by `codex-otel-plugin`: span structure, field naming, token semantics, and UI guidance. See [metrics.md](metrics.md) for metric semantics.
 
-当前 Trace attributes 按 OpenTelemetry GenAI semantic conventions 输出。Span name 当前使用 `invoke_agent`、`llm`、`assistant`、`skill:<name>`、`tool:<name>`。
+Trace attributes are emitted using OpenTelemetry GenAI semantic conventions where possible. The current span names are `invoke_agent`, `llm`, `assistant`, `skill:<name>`, and `tool:<name>`.
 
-## Trace 结构
+## Trace Structure
 
-一次 Codex turn 会生成一棵 trace 树：
+One Codex turn produces a trace tree like this:
 
 ```text
 invoke_agent
@@ -18,198 +18,198 @@ invoke_agent
     └── assistant
 ```
 
-span 关系：
+Span relationships:
 
-- `invoke_agent` 是一个 Codex turn 的根 span，对应 `gen_ai.operation.name=invoke_agent`。
-- `llm` 是一次模型调用，parent 是 `invoke_agent`，对应 `gen_ai.operation.name=chat`。
-- `assistant` 是一次助手消息输出，parent 是对应的 `llm` span，不携带 token usage。
-- `tool:<name>` 是一次工具调用；parent 是触发该工具调用的 `llm` span，对应 `gen_ai.operation.name=execute_tool`。
-- `skill:<name>` 是一次 skill 资源使用跨度；当某个工具调用被识别为读取 skill 的 `SKILL.md` 或同一 skill 目录资源时，会在该 `tool:*` 下生成对应的 `skill:*` span。当前使用 `gen_ai.operation.name=skill` 表示 skill 语义。
-- 当工具调用没有稳定归属到某个 skill 时，只保留 `tool:*` span，不强行生成 `skill:*`。
-- `llm` span 的结束时间至少覆盖其下 assistant / tool 子节点，避免父节点显示为 `0ns` 而子节点仍有持续时间。
+- `invoke_agent` is the root span for a Codex turn and maps to `gen_ai.operation.name=invoke_agent`.
+- `llm` is a single model call. Its parent is `invoke_agent`, and it maps to `gen_ai.operation.name=chat`.
+- `assistant` is a single assistant message output. Its parent is the matching `llm` span, and it does not carry token usage.
+- `tool:<name>` is a single tool call. Its parent is the `llm` span that triggered it, and it maps to `gen_ai.operation.name=execute_tool`.
+- `skill:<name>` is a span that represents skill resource usage. When a tool call is confidently identified as reading `SKILL.md` or related files under the same skill directory, the corresponding `skill:*` span is created under that `tool:*` span. It uses `gen_ai.operation.name=skill`.
+- If a tool call cannot be confidently attributed to a skill, only the `tool:*` span is kept.
+- The `llm` span end time is extended to cover assistant / tool child nodes so the parent span does not appear as `0ns` while children still have duration.
 
-## Skill 识别规则
+## Skill Detection Rules
 
-Codex transcript 当前没有原生 `skill_invoked` 事件。本插件只做高置信度识别：
+Codex transcripts do not currently contain a native `skill_invoked` event. The plugin therefore uses high-confidence detection only:
 
-- 工具参数中直接出现某个 `.../SKILL.md` 路径时，创建对应 `skill:<name>` span。
-- 同一 `llm` step 内后续工具参数若继续访问同一 skill 目录下资源，也会挂到这个 `skill:<name>` span 下。
-- 仅提到 skill 名、只有 skills 列表、或无法稳定关联到某个 skill 目录时，不会强行生成 `skill:*` span。
+- If tool arguments directly contain a `.../SKILL.md` path, create the matching `skill:<name>` span.
+- If later tool arguments within the same `llm` step keep accessing files under the same skill directory, attach them to that `skill:<name>` span.
+- If the transcript only mentions a skill name, only lists skills, or cannot be stably linked to a skill directory, no `skill:*` span is created.
 
 ## Resource Attributes
 
-默认 resource attributes：
+Default resource attributes:
 
-| 字段 | 含义 |
+| Field | Meaning |
 | --- | --- |
-| `service.name` | 当前为 `gtrace-codex` |
-| `telemetry.sdk.language` | 当前为 `nodejs` |
-| `telemetry.sdk.name` | 当前为 `gtrace` |
-| `telemetry.sdk.version` | 当前插件内置采集版本 |
-| `host` | 当前宿主机 hostname |
-| `agent_runtime` | 当前为 `codex` |
-| `gen_ai.agent.version` | Codex CLI 版本 |
-| `runtime_environment` | 运行环境，来自配置 `environment` |
+| `service.name` | `gtrace-codex` |
+| `telemetry.sdk.language` | `nodejs` |
+| `telemetry.sdk.name` | `gtrace` |
+| `telemetry.sdk.version` | built-in plugin collector version |
+| `host` | current hostname |
+| `agent_runtime` | `codex` |
+| `gen_ai.agent.version` | Codex CLI version |
+| `runtime_environment` | runtime environment from config `environment` |
 
-配置中的 `resourceAttributes` 会合并到每个 trace resource 上，适合放跨 trace/metric 统一筛选的全局 tag，例如 `deployment.environment`、`app_id`、`app_name`、`agent_type`、`agent_source`。不要把 `run_id`、真实用户输入或高基数一次性字段放进 resource attributes。
+Configured `resourceAttributes` are merged into every trace resource. They are appropriate for global tags shared across traces and metrics, such as `deployment.environment`, `app_id`, `app_name`, `agent_type`, and `agent_source`. Do not put `run_id`, real user input, or high-cardinality one-shot values into resource attributes.
 
 ## GenAI Attributes
 
-### 会话、Agent 与模型
+### Session, Agent, and Model
 
-| 字段 | 含义 | 常见 span |
+| Field | Meaning | Typical spans |
 | --- | --- | --- |
-| `gen_ai.conversation.id` | Codex session ID | 全部 |
-| `session_id` | Codex session ID 兼容字段，值与 `gen_ai.conversation.id` 相同 | 全部 |
-| `gen_ai.agent.name` | Agent 名称，当前为 `codex` | 全部 |
-| `gen_ai.agent.version` | Agent 版本，当前使用 Codex CLI 版本 | 全部 |
-| `gen_ai.operation.name` | GenAI 操作名：`invoke_agent`、`chat`、`skill`、`execute_tool` | `invoke_agent`、`llm`、`skill:*`、`tool:*` |
-| `gen_ai.output.type` | 请求侧声明的输出类型；当前默认按 Codex chat 请求映射为 `text`，显式 JSON 输出请求映射为 `json` | `invoke_agent`、`llm`、`assistant` |
-| `gen_ai.input.messages` | 结构化输入消息数组，当前按 OpenTelemetry GenAI message schema 输出 | `invoke_agent`、`llm` |
-| `gen_ai.output.messages` | 结构化输出消息数组，当前按 OpenTelemetry GenAI message schema 输出 | `invoke_agent`、`llm` |
-| `gen_ai.provider.name` | 模型供应商，例如 `openai` | `invoke_agent`、`llm`、`assistant`、`tool:*` |
-| `gen_ai.request.model` | 请求模型名 | `invoke_agent`、`llm`、`assistant`、`tool:*` |
-| `gen_ai.response.model` | 响应模型名 | `invoke_agent`、`llm`、`assistant`、`tool:*` |
-| `gen_ai.response.finish_reasons` | 当前 generation 对应的停止原因数组 | `invoke_agent`、`llm` |
+| `gen_ai.conversation.id` | Codex session ID | all |
+| `session_id` | compatibility alias with the same value as `gen_ai.conversation.id` | all |
+| `gen_ai.agent.name` | agent name, currently `codex` | all |
+| `gen_ai.agent.version` | agent version, currently the Codex CLI version | all |
+| `gen_ai.operation.name` | GenAI operation name: `invoke_agent`, `chat`, `skill`, `execute_tool` | `invoke_agent`, `llm`, `skill:*`, `tool:*` |
+| `gen_ai.output.type` | declared output type; currently `text` for normal Codex chat requests and `json` for explicit JSON output requests | `invoke_agent`, `llm`, `assistant` |
+| `gen_ai.input.messages` | structured input messages array, using the OpenTelemetry GenAI message schema | `invoke_agent`, `llm` |
+| `gen_ai.output.messages` | structured output messages array, using the OpenTelemetry GenAI message schema | `invoke_agent`, `llm` |
+| `gen_ai.provider.name` | model provider, for example `openai` | `invoke_agent`, `llm`, `assistant`, `tool:*` |
+| `gen_ai.request.model` | requested model name | `invoke_agent`, `llm`, `assistant`, `tool:*` |
+| `gen_ai.response.model` | response model name | `invoke_agent`, `llm`, `assistant`, `tool:*` |
+| `gen_ai.response.finish_reasons` | finish reason array for the generation | `invoke_agent`, `llm` |
 
-当前消息映射约定：
+Current message mapping rules:
 
-- `invoke_agent.gen_ai.input.messages`：当前 turn 的用户输入。
-- `invoke_agent.gen_ai.output.messages`：当前 turn 的最终助手输出。
-- 首个 `llm.gen_ai.input.messages`：用户输入。
-- 后续 `llm.gen_ai.input.messages`：上一轮工具调用结果，按 `role=tool` + `tool_call_response` part 输出。
-- `llm.gen_ai.output.messages`：当前模型输出，文本回复用 `text` part，reasoning 用 `reasoning` part，工具请求用 `tool_call` part。
-- `gen_ai.response.finish_reasons`：当前实现按 `stop`、`tool_call`、`cancelled` 映射。
+- `invoke_agent.gen_ai.input.messages`: the current turn's user input
+- `invoke_agent.gen_ai.output.messages`: the current turn's final assistant output
+- the first `llm.gen_ai.input.messages`: the user input
+- later `llm.gen_ai.input.messages`: previous tool results, emitted as `role=tool` with `tool_call_response` parts
+- `llm.gen_ai.output.messages`: the current model output; text replies use `text`, reasoning uses `reasoning`, and tool requests use `tool_call`
+- `gen_ai.response.finish_reasons`: currently mapped to `stop`, `tool_call`, or `cancelled`
 
-### 请求字段
+### Request Fields
 
-| 字段 | 含义 | 常见 span |
+| Field | Meaning | Typical spans |
 | --- | --- | --- |
-| `gen_ai.request.choice.count` | 请求的候选输出数量 | `invoke_agent`、`llm` |
-| `gen_ai.request.seed` | 请求 seed | `invoke_agent`、`llm` |
-| `gen_ai.request.temperature` | 请求 temperature | `invoke_agent`、`llm` |
-| `gen_ai.request.top_p` | 请求 top_p | `invoke_agent`、`llm` |
-| `gen_ai.request.max_tokens` | 请求 max output tokens | `invoke_agent`、`llm` |
-| `gen_ai.request.presence_penalty` | 请求 presence penalty | `invoke_agent`、`llm` |
-| `gen_ai.request.frequency_penalty` | 请求 frequency penalty | `invoke_agent`、`llm` |
-| `gen_ai.request.stop_sequences` | 请求 stop sequences | `invoke_agent`、`llm` |
-| `gen_ai.system_instructions` | 系统指令，当前从 `base_instructions` 和 developer instructions 提取 | `invoke_agent`、`llm` |
-| `gen_ai.tool.definitions` | 模型可用工具定义列表；当前从 `turn_context.tools` 等字段提取 | `invoke_agent`、`llm` |
+| `gen_ai.request.choice.count` | requested number of choices | `invoke_agent`, `llm` |
+| `gen_ai.request.seed` | request seed | `invoke_agent`, `llm` |
+| `gen_ai.request.temperature` | request temperature | `invoke_agent`, `llm` |
+| `gen_ai.request.top_p` | request top_p | `invoke_agent`, `llm` |
+| `gen_ai.request.max_tokens` | requested max output tokens | `invoke_agent`, `llm` |
+| `gen_ai.request.presence_penalty` | request presence penalty | `invoke_agent`, `llm` |
+| `gen_ai.request.frequency_penalty` | request frequency penalty | `invoke_agent`, `llm` |
+| `gen_ai.request.stop_sequences` | request stop sequences | `invoke_agent`, `llm` |
+| `gen_ai.system_instructions` | system instructions, currently extracted from `base_instructions` and developer instructions | `invoke_agent`, `llm` |
+| `gen_ai.tool.definitions` | available tool definitions, currently extracted from `turn_context.tools` and related fields | `invoke_agent`, `llm` |
 
-### Skill 字段
+### Skill Fields
 
-截至 2026-06-25，`skill` 仍没有 OpenTelemetry GenAI 已落地的一等字段。本插件保留现有兼容字段，同时补充 `gen_ai.skill.*` 项目扩展字段；其中 `gen_ai.skill.name`、`gen_ai.skill.description`、`gen_ai.skill.version` 与社区提案方向一致，但当前仍不是正式标准字段。
+As of 2026-06-25, `skill` still has no first-class OpenTelemetry GenAI semantic field. This plugin keeps the existing compatibility fields while adding project-specific `gen_ai.skill.*` extensions. `gen_ai.skill.name`, `gen_ai.skill.description`, and `gen_ai.skill.version` are aligned with community direction but are not yet formal standard fields.
 
-| 字段 | 含义 | 常见 span |
+| Field | Meaning | Typical spans |
 | --- | --- | --- |
-| `skill.name` | skill 名称，来自 `SKILL.md` 所在目录名 | `skill:*`、`tool:*` |
-| `skill.description` | skill 描述，值与 `gen_ai.skill.description` 一致，优先读取 `SKILL.md` frontmatter 中的 `description`，无 frontmatter 时回退正文首个说明段落 | `skill:*`、`tool:*` |
-| `skill.path` | skill 入口文件绝对路径，当前为识别到的 `.../SKILL.md` | `skill:*`、`tool:*` |
-| `skill_call_id` | skill 对应的 tool call ID，用于把 `skill:*` span 与触发它的工具调用关联起来 | `skill:*`、`tool:*` |
-| `skill.source.type` | skill 来源类型，当前取值 `system`、`user`、`workspace` | `skill:*`、`tool:*` |
-| `skill.result_status` | skill 结果状态，当前按其子 tool 是否报错映射为 `completed` 或 `error` | `skill:*`、`tool:*` |
-| `gen_ai.skill.name` | skill 名称的 `gen_ai.*` 扩展字段 | `skill:*`、`tool:*` |
-| `gen_ai.skill.path` | skill 入口文件绝对路径的 `gen_ai.*` 扩展字段 | `skill:*`、`tool:*` |
-| `gen_ai.skill.source.type` | skill 来源类型的 `gen_ai.*` 扩展字段 | `skill:*`、`tool:*` |
-| `gen_ai.skill.result.status` | skill 结果状态的 `gen_ai.*` 扩展字段 | `skill:*`、`tool:*` |
-| `gen_ai.skill.description` | skill 描述；优先读取 `SKILL.md` frontmatter 中的 `description`，无 frontmatter 时回退正文首个说明段落 | `skill:*`、`tool:*` |
-| `gen_ai.skill.version` | skill 版本；优先读取 `SKILL.md` frontmatter 的 `version`，其次读取同目录 `package.json.version`；没有明确元数据时不生成 | `skill:*`、`tool:*` |
+| `skill.name` | skill name, derived from the directory that contains `SKILL.md` | `skill:*`, `tool:*` |
+| `skill.description` | skill description, equal to `gen_ai.skill.description`; prefers `description` from `SKILL.md` frontmatter and falls back to the first descriptive paragraph | `skill:*`, `tool:*` |
+| `skill.path` | absolute path to the skill entry file, currently the detected `.../SKILL.md` | `skill:*`, `tool:*` |
+| `skill_call_id` | tool call ID that ties the `skill:*` span to the triggering tool call | `skill:*`, `tool:*` |
+| `skill.source.type` | skill source type, currently `system`, `user`, or `workspace` | `skill:*`, `tool:*` |
+| `skill.result_status` | skill result status, currently `completed` or `error` depending on child tools | `skill:*`, `tool:*` |
+| `gen_ai.skill.name` | `gen_ai.*` extension for the skill name | `skill:*`, `tool:*` |
+| `gen_ai.skill.path` | `gen_ai.*` extension for the absolute skill entry path | `skill:*`, `tool:*` |
+| `gen_ai.skill.source.type` | `gen_ai.*` extension for the skill source type | `skill:*`, `tool:*` |
+| `gen_ai.skill.result.status` | `gen_ai.*` extension for the skill result status | `skill:*`, `tool:*` |
+| `gen_ai.skill.description` | skill description; prefers `description` in `SKILL.md` frontmatter and falls back to the first descriptive paragraph | `skill:*`, `tool:*` |
+| `gen_ai.skill.version` | skill version; prefers `SKILL.md` frontmatter, then `package.json.version` in the same directory; omitted when no stable metadata exists | `skill:*`, `tool:*` |
 
-### Token 字段
+### Token Fields
 
-| 字段 | 含义 | 常见 span |
+| Field | Meaning | Typical spans |
 | --- | --- | --- |
-| `gen_ai.usage.input_tokens` | 输入 token，包含缓存命中输入 token | `invoke_agent`、`llm` |
-| `gen_ai.usage.output_tokens` | 输出 token | `invoke_agent`、`llm` |
-| `gen_ai.usage.cache_read.input_tokens` | 命中 provider-managed cache 的输入 token | `invoke_agent`、`llm` |
-| `gen_ai.usage.reasoning.output_tokens` | reasoning 输出 token | `invoke_agent`、`llm` |
+| `gen_ai.usage.input_tokens` | input tokens, including cache-hit input tokens | `invoke_agent`, `llm` |
+| `gen_ai.usage.output_tokens` | output tokens | `invoke_agent`, `llm` |
+| `gen_ai.usage.cache_read.input_tokens` | provider-managed cache-hit input tokens | `invoke_agent`, `llm` |
+| `gen_ai.usage.reasoning.output_tokens` | reasoning output tokens | `invoke_agent`, `llm` |
 
-`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`invoke_agent` span 上的 `gen_ai.usage.*` 表示当前 turn 内所有 `llm` span 的汇总。`assistant` span 不携带 token usage，避免重复计算。
+On `llm` spans, `gen_ai.usage.*` describes a single model call. On `invoke_agent`, it is the sum across `llm` spans in the turn. `assistant` spans never carry token usage to avoid double counting.
 
-`gen_ai.usage.input_tokens` 按 OpenTelemetry 语义包含所有输入 token，因此和旧 `usage_input_tokens` 的“非缓存输入 token”口径不同。
+`gen_ai.usage.input_tokens` follows the OpenTelemetry meaning of full input tokens, so it differs from older `usage_input_tokens` semantics that excluded cached input tokens.
 
-### 工具字段
+### Tool Fields
 
-| 字段 | 含义 | 常见 span |
+| Field | Meaning | Typical spans |
 | --- | --- | --- |
-| `gen_ai.tool.name` | 工具名称 | `tool:*` |
-| `gen_ai.tool.call.id` | 工具调用 ID | `tool:*` |
-| `gen_ai.tool.call.arguments` | 工具入参预览，按 `max_chars` 裁剪 | `tool:*` |
-| `gen_ai.tool.call.result` | 工具结果预览，按 `max_chars` 裁剪 | `tool:*` |
+| `gen_ai.tool.name` | tool name | `tool:*` |
+| `gen_ai.tool.call.id` | tool call ID | `tool:*` |
+| `gen_ai.tool.call.arguments` | clipped tool argument preview | `tool:*` |
+| `gen_ai.tool.call.result` | clipped tool result preview | `tool:*` |
 
-`tool_command` 仍保留，用于从 `args.cmd` 或 `args.command` 提取命令展示。
+`tool_command` is still preserved as a project field and is extracted from `args.cmd` or `args.command`.
 
-## 项目字段
+## Project-Specific Fields
 
-以下字段没有直接的 GenAI 官方等价或属于本插件排查字段，继续保留：
+These fields do not have a direct GenAI standard equivalent or are intentionally kept as plugin-specific troubleshooting fields:
 
-| 字段 | 含义 | 常见 span |
+| Field | Meaning | Typical spans |
 | --- | --- | --- |
-| `run_id` / `run_ids` | 当前 turn ID | 全部 |
-| `session_create_at` | 会话创建时间 | `invoke_agent` |
-| `session_updated_at` | 当前 turn 对应的会话更新时间 | `invoke_agent` |
-| `session_channel` | 会话来源通道 | `invoke_agent` |
-| `ttft` | 首 token 等待时间，单位毫秒 | `llm` |
-| `input_preview` / `input_length` | 输入预览与长度 | `invoke_agent`、`llm` |
-| `output_preview` / `output_length` | 输出预览与长度 | `invoke_agent`、`llm`、`assistant` |
-| `output_kind` | 输出类型，例如 `text`、`tool_call` | `llm`、`assistant` |
-| `tool_count` | 当前 turn 的工具调用数量 | `invoke_agent` |
-| `tool_command` | 工具目标命令 | `tool:*` |
-| `tool_result_status` | 工具结果状态，`completed` 或 `error` | `tool:*` |
-| `final_status` | turn 最终状态 | `invoke_agent` |
-| `status` | 业务状态，通常为 `ok` 或 `error` | 全部 |
-| `reason` | 错误或取消原因 | `invoke_agent`、`tool:*` |
-| `error.type` | OpenTelemetry 错误类型，当前错误时为 `_OTHER` | `invoke_agent`、`tool:*` |
+| `run_id` / `run_ids` | current turn ID | all |
+| `session_create_at` | session creation time | `invoke_agent` |
+| `session_updated_at` | session update time for the current turn | `invoke_agent` |
+| `session_channel` | session source channel | `invoke_agent` |
+| `ttft` | time to first token, in milliseconds | `llm` |
+| `input_preview` / `input_length` | input preview and length | `invoke_agent`, `llm` |
+| `output_preview` / `output_length` | output preview and length | `invoke_agent`, `llm`, `assistant` |
+| `output_kind` | output kind such as `text` or `tool_call` | `llm`, `assistant` |
+| `tool_count` | number of tool calls in the current turn | `invoke_agent` |
+| `tool_command` | target command for the tool | `tool:*` |
+| `tool_result_status` | tool result status, `completed` or `error` | `tool:*` |
+| `final_status` | terminal turn status | `invoke_agent` |
+| `status` | business status, usually `ok` or `error` | all |
+| `reason` | error or cancellation reason | `invoke_agent`, `tool:*` |
+| `error.type` | OpenTelemetry error type, currently `_OTHER` for error cases | `invoke_agent`, `tool:*` |
 
-`final_status` 当前取值：
+Current `final_status` values:
 
-| 值 | 含义 |
+| Value | Meaning |
 | --- | --- |
-| `completed` | turn 已完成 |
-| `cancelled` | turn 被用户中断或取消 |
-| `unset` | 未能确认完成状态 |
+| `completed` | the turn completed |
+| `cancelled` | the turn was interrupted or cancelled |
+| `unset` | completion could not be confirmed |
 
-Stop hook 可能早于 `task_complete` 写入。解析器会在已有 `agent_message`、assistant 最终输出或带文本 step 时推断为 `completed`。
+The Stop hook may run before `task_complete` is written. The parser infers `completed` if an `agent_message`, final assistant output, or a textual step already exists.
 
-为避免同一个 `turn_id` 的中间态和完成态分别形成两条链路，当前只上报终态 turn：`completed` 或 `cancelled`。`unset` 仅作为内部状态保留，正常 OTLP Trace 上报不会看到未完成 turn。终态 turn 一旦成功写入对应 transcript 的 `.gtrace` sidecar，后续重解析即使算出不同 fingerprint，也不会再次上报。
+To avoid separate trace chains for the same `turn_id` in intermediate and terminal states, only terminal turns are uploaded: `completed` or `cancelled`. `unset` stays internal and does not normally appear in OTLP Trace uploads. Once a terminal turn is written to the transcript `.gtrace` sidecar, it is never uploaded again even if re-parsing later produces a different fingerprint.
 
-只有启动上下文、没有真实用户输入、模型输出、工具调用或 token usage 的空白 turn 不会上报。
+Blank turns that contain only startup context and no real user input, model output, tool call, or token usage are not uploaded.
 
-`llm` span 的 duration 当前包含 `ttft`。实现上会把 `llm` 的起点前移到“本次模型请求发起时刻”，同时把等待首 token 的时长单独保留在 `ttft` 字段中，便于 UI 直接展示真实耗时。
+`llm` span duration currently includes `ttft`. The implementation shifts the `llm` start time back to the time the model request was initiated, while also preserving the first-token wait as a separate `ttft` field so the UI can display the real end-to-end duration directly.
 
-## 字段变更关系
+## Field Migration Notes
 
-| 旧字段 | 新字段 / 处理方式 |
+| Old field | New field / handling |
 | --- | --- |
-| `session_id` | 兼容保留，同时继续输出 `gen_ai.conversation.id` |
-| 无统一结构化输入/输出字段 | 新增 `gen_ai.input.messages`、`gen_ai.output.messages` |
+| `session_id` | still emitted for compatibility, alongside `gen_ai.conversation.id` |
+| no unified structured input/output field | add `gen_ai.input.messages` and `gen_ai.output.messages` |
 | `session_agent` | `gen_ai.agent.name` |
 | `agent_version` | `gen_ai.agent.version` |
 | `provider_name` | `gen_ai.provider.name` |
-| `model_name` | `gen_ai.request.model`、`gen_ai.response.model` |
+| `model_name` | `gen_ai.request.model`, `gen_ai.response.model` |
 | `tool_name` | `gen_ai.tool.name` |
 | `tool_call_id` | `gen_ai.tool.call.id` |
 | `tool_args_preview` | `gen_ai.tool.call.arguments` |
 | `tool_result_preview` | `gen_ai.tool.call.result` |
-| `usage_input_tokens` | 停止输出；`gen_ai.usage.input_tokens` 改为完整输入 token，包含缓存命中 |
+| `usage_input_tokens` | stopped; `gen_ai.usage.input_tokens` now means full input tokens including cache hits |
 | `usage_output_tokens` | `gen_ai.usage.output_tokens` |
-| `usage_total_tokens` | 停止输出；需要总量时由 `gen_ai.usage.input_tokens + gen_ai.usage.output_tokens` 推导 |
+| `usage_total_tokens` | stopped; derive totals from `gen_ai.usage.input_tokens + gen_ai.usage.output_tokens` if needed |
 | `usage_cache_read_input_tokens` | `gen_ai.usage.cache_read.input_tokens` |
-| `usage_cache_total_tokens` | 停止输出；当前等价于 `gen_ai.usage.cache_read.input_tokens` |
+| `usage_cache_total_tokens` | stopped; currently equivalent to `gen_ai.usage.cache_read.input_tokens` |
 | `usage_reasoning_tokens` | `gen_ai.usage.reasoning.output_tokens` |
-| `usage_context_input_tokens` | 停止输出；完整输入口径已合并到 `gen_ai.usage.input_tokens` |
-| `usage_context_total_tokens` | 停止输出 |
-| `request_model` / `response_model` | 不输出；使用 `gen_ai.request.model` / `gen_ai.response.model` |
+| `usage_context_input_tokens` | stopped; full input semantics now live in `gen_ai.usage.input_tokens` |
+| `usage_context_total_tokens` | stopped |
+| `request_model` / `response_model` | not emitted as primary fields; use `gen_ai.request.model` / `gen_ai.response.model` |
 
-## UI 展示建议
+## UI Guidance
 
-顶部概览建议展示：
+Recommended top-level overview fields:
 
-| UI 名称 | 字段 |
+| UI label | Field |
 | --- | --- |
-| 输入 Token | `gen_ai.usage.input_tokens` |
-| 输出 Token | `gen_ai.usage.output_tokens` |
-| 缓存命中 Token | `gen_ai.usage.cache_read.input_tokens` |
-| 推理 Token | `gen_ai.usage.reasoning.output_tokens` |
+| Input Tokens | `gen_ai.usage.input_tokens` |
+| Output Tokens | `gen_ai.usage.output_tokens` |
+| Cache-Hit Tokens | `gen_ai.usage.cache_read.input_tokens` |
+| Reasoning Tokens | `gen_ai.usage.reasoning.output_tokens` |
 
-调用分析表的“目标/命令”建议优先展示 `tool_command`，最后回退到 `gen_ai.tool.call.arguments`。
+For the "target / command" column in a call-analysis table, prefer `tool_command`, then fall back to `gen_ai.tool.call.arguments`.

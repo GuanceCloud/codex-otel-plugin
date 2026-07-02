@@ -1,17 +1,17 @@
-# 配置说明
+# Configuration
 
-本文档说明 `codex-otel-plugin` 的 Hook 配置读取顺序、推荐配置、认证方式和全局 `resourceAttributes` 约定。
+This document describes how `codex-otel-plugin` loads hook configuration, recommended config layouts, authentication, and global `resourceAttributes`.
 
-## 配置读取顺序
+## Config Resolution Order
 
-Codex hook 按以下顺序读取配置：
+The Codex hook loads configuration in this order:
 
 1. `~/.codex/gtrace.json`
-2. 当前项目下的 `.codex/gtrace.json`
+2. `.codex/gtrace.json` in the current project
 
-运行时配置只支持 `gtrace.json` 文件，不再支持通过环境变量覆盖。
+Runtime configuration is file-based only. Environment-variable overrides are no longer supported.
 
-## 推荐 Dataway/GTrace 配置
+## Recommended Dataway / GTrace Config
 
 ```json
 {
@@ -35,9 +35,9 @@ Codex hook 按以下顺序读取配置：
 }
 ```
 
-不要把真实 token 写入仓库文件、测试 fixture 或文档示例。
+Do not put real tokens into repository files, test fixtures, or documentation examples.
 
-## 本地调试配置
+## Local Debug Config
 
 ```json
 {
@@ -54,9 +54,9 @@ Codex hook 按以下顺序读取配置：
 }
 ```
 
-## 完整 OTLP URL 配置
+## Full OTLP URL Config
 
-如果 trace 和 metrics 使用完整 OTLP URL，可以直接配置：
+If traces and metrics use full OTLP URLs, configure them directly:
 
 ```json
 {
@@ -68,7 +68,7 @@ Codex hook 按以下顺序读取配置：
 }
 ```
 
-兼容配置字段：
+Compatible config fields:
 
 - `base_url`
 - `otel_traces_url`
@@ -78,11 +78,11 @@ Codex hook 按以下顺序读取配置：
 - `resourceAttributes`
 - `timeout_ms`
 
-`timeout_ms` 是单次 HTTP 请求超时，默认 `25000` 毫秒。trace 和 metrics 分别各发一次请求；如果你的接收端链路较慢，可以显式调大。
+`timeout_ms` is the timeout for a single HTTP request. The default is `25000` milliseconds. Traces and metrics are uploaded as separate requests. Increase this value if your receiver is slow.
 
-## 认证
+## Authentication
 
-兼容 Basic Auth：
+Basic Auth is supported:
 
 ```json
 {
@@ -95,11 +95,11 @@ Codex hook 按以下顺序读取配置：
 }
 ```
 
-如果 `headers.Authorization` 已配置，hook 会优先使用该值，不再自动覆盖；否则可以通过 `public_key` / `secret_key` 自动补 Basic Auth。
+If `headers.Authorization` is already configured, the hook keeps it as-is. Otherwise it can synthesize a Basic Auth header from `public_key` and `secret_key`.
 
 ## Resource Attributes
 
-全局筛选类 tag 应放在 OTLP `resource.attributes`，trace 和 metrics 会共享同一批 `resourceAttributes`。推荐字段：
+Global filter tags should live in OTLP `resource.attributes`. Traces and metrics share the same `resourceAttributes`. Recommended fields:
 
 - `host`
 - `deployment.environment`
@@ -108,12 +108,12 @@ Codex hook 按以下顺序读取配置：
 - `agent_type`
 - `agent_source`
 
-说明：
+Notes:
 
-- `host` 默认自动采集当前宿主机 hostname，也可通过 `resourceAttributes.host` 覆盖。
-- 不要把 `run_id`、真实用户输入或高基数一次性字段放进 `resourceAttributes`。
-- 安装脚本的 `--tag KEY=VALUE` 会把值写入 `resourceAttributes`。
-- `tags` 只作为兼容输入保留，运行时会被折叠进 `resourceAttributes`；新配置不需要同时保留 `tags`、`metadata` 和 `resourceAttributes` 三份相同内容。
-- `metadata` 会写成 span attributes；只有你明确需要把某些自定义字段复制到每个 span 上时才需要配置它。
+- `host` is collected from the current hostname by default, and can be overridden with `resourceAttributes.host`.
+- Do not put `run_id`, real user input, or other one-shot high-cardinality fields into `resourceAttributes`.
+- The installer flag `--tag KEY=VALUE` writes values into `resourceAttributes`.
+- `tags` is kept only as a compatibility input. At runtime it is folded into `resourceAttributes`. New configs do not need to keep duplicate values across `tags`, `metadata`, and `resourceAttributes`.
+- `metadata` is copied into span attributes. Use it only when you explicitly want custom fields repeated on every span.
 
-如需调整配置，请直接修改 `~/.codex/gtrace.json` 或当前项目 `.codex/gtrace.json`。
+To change configuration, edit `~/.codex/gtrace.json` or the current project's `.codex/gtrace.json`.

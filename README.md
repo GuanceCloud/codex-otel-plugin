@@ -1,19 +1,19 @@
 # codex-otel-plugin
 
-`codex-otel-plugin` 是一个 Codex 可观测采集插件。它通过 Codex Stop hook 读取 rollout transcript，将一次 Codex turn 转换为 OpenTelemetry OTLP Trace 与 Metrics，并通过 HTTP/protobuf 上报。
+`codex-otel-plugin` is an observability plugin for Codex. It reads Codex rollout transcripts from the Stop hook, converts each Codex turn into OpenTelemetry OTLP Traces and Metrics, and uploads them over HTTP/protobuf.
 
-当前实现只使用 Node.js 内置模块，没有运行时 npm 第三方依赖。
+The current implementation uses only built-in Node.js modules and has no runtime npm dependencies.
 
-## 能力概览
+## Capabilities
 
-- 采集 Codex turn、模型调用、skill 资源访问、工具调用、结构化 input/output messages、请求参数和 token usage。
-- 生成 `invoke_agent`、`llm`、`assistant`、`skill:<name>`、`tool:<name>` 五类 span。
-- 使用 OTLP Trace 与 Metrics HTTP/protobuf 上报。
-- Metrics 从同批 trace spans 派生，触发时机与 traces 相同，不做定时上报。
-- 支持 Dataway/GTrace 风格的 `endpoint + tracePath + metricsPath + headers` 配置。
-- 提供本地 ingest/debug server，便于接收和检查 OTLP JSON/protobuf 数据。
+- Collect Codex turns, model calls, skill resource usage, tool calls, structured input/output messages, request parameters, and token usage.
+- Emit five span classes: `invoke_agent`, `llm`, `assistant`, `skill:<name>`, and `tool:<name>`.
+- Upload both OTLP Traces and OTLP Metrics over HTTP/protobuf.
+- Derive metrics from the same trace spans and upload them at the same time as traces, without periodic flushing.
+- Support Dataway / GTrace-style `endpoint + tracePath + metricsPath + headers` configuration.
+- Provide a local ingest/debug server for inspecting OTLP JSON/protobuf payloads.
 
-## 工作流程
+## Flow
 
 ```text
 Codex Stop hook
@@ -22,30 +22,30 @@ Codex Stop hook
 src/codex-hook-wrapper.js
     |
     v
-src/codex-parse.js 解析 rollout JSONL
+src/codex-parse.js parses rollout JSONL
     |
     v
-src/codex-collector.js 生成 span
+src/codex-collector.js builds spans
     |
     v
-src/codex-metrics.js 从 span 派生 metrics
+src/codex-metrics.js derives metrics from spans
     |
     v
-src/codex-otlp.js / src/proto.js 编码 OTLP protobuf
+src/codex-otlp.js / src/proto.js encode OTLP protobuf
     |
     v
 POST <endpoint>/<tracePath>
 POST <endpoint>/<metricsPath>
 ```
 
-## 快速开始
+## Quick Start
 
-要求：
+Requirements:
 
 - Node.js >= 22
-- 远程安装需要 `curl`、`tar`、`gzip`
+- `curl`, `tar`, and `gzip` for remote installation
 
-推荐直接使用远程安装器：
+The recommended path is the remote installer:
 
 ```bash
 curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
@@ -54,43 +54,44 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
       --x-token <token>
 ```
 
-安装完成后重启 Codex，让 Stop hook 重新加载。
-如果本机同时安装过 `codex-observability-plugin`，安装器会自动移除它的 `tracing` 插件并清掉残留配置，避免同一份 transcript 被重复上报。
+Restart Codex after installation so the Stop hook is reloaded.
 
-如果接收端偶发较慢，运行时单次 OTLP HTTP 请求默认超时为 `25000ms`；可在 `~/.codex/gtrace.json` 里通过 `timeout_ms` 调整。
+If `codex-observability-plugin` is also installed on the same machine, the installer removes its `tracing` plugin and clears stale config entries so the same transcript is not uploaded twice.
 
-更多安装、升级、卸载和参数说明见 [docs/install.md](docs/install.md)。
+If the receiver is occasionally slow, the default timeout for a single OTLP HTTP request is `25000ms`. You can override it with `timeout_ms` in `~/.codex/gtrace.json`.
 
-## 文档导航
+See [docs/install.md](docs/install.md) for installation, upgrade, uninstall, and installer options.
 
-| 文档 | 说明 |
+## Documentation
+
+| Document | Description |
 | --- | --- |
-| [docs/install.md](docs/install.md) | 安装、升级、卸载、安装参数和开发安装 |
-| [docs/configuration.md](docs/configuration.md) | Hook 文件配置、认证和 `resourceAttributes` 约定 |
-| [docs/development.md](docs/development.md) | 本地调试服务、验证命令和排查方式 |
-| [docs/traces.md](docs/traces.md) | Trace/span 结构、字段命名、token 口径和展示建议 |
-| [docs/metrics.md](docs/metrics.md) | Metrics 指标体系、tag、token 映射和 OTLP 形态 |
+| [docs/install.md](docs/install.md) | Installation, upgrade, uninstall, installer options, and development install |
+| [docs/configuration.md](docs/configuration.md) | Hook config, authentication, and `resourceAttributes` conventions |
+| [docs/development.md](docs/development.md) | Local debug server, verification commands, and troubleshooting |
+| [docs/traces.md](docs/traces.md) | Trace/span structure, field naming, token semantics, and UI guidance |
+| [docs/metrics.md](docs/metrics.md) | Metric design, tags, token mapping, and OTLP shape |
 
-## 数据模型
+## Data Model
 
-Trace 字段、Span name、`gen_ai.input.messages` / `gen_ai.output.messages` 结构、token 口径和 UI 展示建议见 [docs/traces.md](docs/traces.md)。
+See [docs/traces.md](docs/traces.md) for trace fields, span names, `gen_ai.input.messages` / `gen_ai.output.messages`, token semantics, and UI guidance.
 
-Metrics 指标体系、tag 设计和 OTLP 形态见 [docs/metrics.md](docs/metrics.md)。
+See [docs/metrics.md](docs/metrics.md) for the metric model, tag design, and OTLP encoding choices.
 
-当前 skill 维度字段同时保留兼容 `skill.*`，并补充 `gen_ai.skill.*` 项目扩展字段；`description` 和 `version` 只在本地 skill 元数据可稳定提取时生成，`skill.description` / `skill_call_id` 只保留在 trace attributes 中。具体字段见 [docs/traces.md](docs/traces.md) 和 [docs/metrics.md](docs/metrics.md)。
+The current skill-related fields keep compatibility `skill.*` fields while also adding project-specific `gen_ai.skill.*` extensions. `description` and `version` are emitted only when they can be extracted reliably from local skill metadata. `skill.description` and `skill_call_id` remain trace-only attributes. See [docs/traces.md](docs/traces.md) and [docs/metrics.md](docs/metrics.md) for the exact field list.
 
-当前 Metrics 只从当前 turn 的 spans 派生以下指标：
+Current metrics derived from each turn's spans:
 
 - `gen_ai.workflow.duration`
 - `gen_ai.agent.operation.count`
 - `gen_ai.agent.operation.duration`
 - `gen_ai.client.token.usage`
 
-Metrics 默认带 `gen_ai.conversation.id`，并兼容保留 `session_id`；仍不带 `session_key` / `run_id`。全局筛选类 tag 建议通过 `resourceAttributes` 放在 OTLP `resource.attributes` 中，并由 trace 和 metrics 共用。旧字段到 GenAI 字段的变更关系见 [docs/traces.md](docs/traces.md) 和 [docs/metrics.md](docs/metrics.md)。
+Metrics include `gen_ai.conversation.id` and the compatibility field `session_id`, but they do not include `session_key` or `run_id`. Global filter tags should be placed in OTLP `resource.attributes` through `resourceAttributes` so traces and metrics can share them. Field migration notes are documented in [docs/traces.md](docs/traces.md) and [docs/metrics.md](docs/metrics.md).
 
-## 开发
+## Development
 
-常用命令：
+Common commands:
 
 ```bash
 npm test
@@ -99,4 +100,4 @@ npm start
 npm run codex:hook
 ```
 
-更多本地调试、验证和排查说明见 [docs/development.md](docs/development.md)。
+See [docs/development.md](docs/development.md) for more local debugging, verification, and troubleshooting details.

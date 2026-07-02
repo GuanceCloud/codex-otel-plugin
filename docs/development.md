@@ -1,8 +1,8 @@
-# 开发与调试
+# Development and Debugging
 
-本文档说明 `codex-otel-plugin` 的本地开发命令、调试服务、验证方式和排查命令。
+This document describes local development commands, the debug ingest service, verification steps, and troubleshooting commands for `codex-otel-plugin`.
 
-## 常用命令
+## Common Commands
 
 ```bash
 npm test
@@ -11,33 +11,33 @@ npm start
 npm run codex:hook
 ```
 
-`npm start` 会启动本地调试服务，默认监听：
+`npm start` launches the local debug service, which listens on:
 
 ```text
 http://localhost:3030
 ```
 
-## 本地调试服务
+## Local Debug Service
 
-启动：
+Start it with:
 
 ```bash
 npm start
 ```
 
-接口：
+Endpoints:
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/health` | 本地服务健康检查 |
-| `GET` | `/api/public/health` | OTLP ingest 健康检查 |
-| `POST` | `/api/public/otel/v1/traces` | 接收 OTLP Trace JSON/protobuf |
-| `POST` | `/api/public/otel/v1/metrics` | 接收 OTLP Metrics JSON/protobuf |
-| `POST` | `/api/gtrace/v1/codex-spans` | 接收原生 JSON 调试 span |
-| `GET` | `/traces?limit=50` | 查看最近规范化 span |
-| `GET` | `/metrics?limit=50` | 查看最近规范化 metric data point |
+| `GET` | `/health` | Local service health check |
+| `GET` | `/api/public/health` | OTLP ingest health check |
+| `POST` | `/api/public/otel/v1/traces` | Accept OTLP Trace JSON/protobuf |
+| `POST` | `/api/public/otel/v1/metrics` | Accept OTLP Metrics JSON/protobuf |
+| `POST` | `/api/gtrace/v1/codex-spans` | Accept native JSON debug spans |
+| `GET` | `/traces?limit=50` | List recent normalized spans |
+| `GET` | `/metrics?limit=50` | List recent normalized metric data points |
 
-本地落盘目录：
+Local output files:
 
 ```text
 data/batches/*.json
@@ -45,18 +45,18 @@ data/spans.ndjson
 data/metrics.ndjson
 ```
 
-`data/` 只用于调试，不是字段规范来源。
+`data/` is for debugging only. It is not the source of truth for field definitions.
 
-## 验证
+## Verification
 
-修改代码、字段口径或文档口径后，至少运行：
+After changing code, field semantics, or documentation wording, run at least:
 
 ```bash
 npm test
 npm ls --all
 ```
 
-期望结果：
+Expected results:
 
 ```text
 14 tests passed
@@ -67,25 +67,25 @@ gtrace@0.1.5 /home/liurui/code/codex-otel-plugin
 └── (empty)
 ```
 
-当前测试覆盖：
+Current test coverage includes:
 
 - OTLP JSON ingest
 - OTLP protobuf ingest
-- Codex hook 解析 rollout 并上报 OTLP Trace/Metrics protobuf
-- 未完成 turn 不上报，完成后只上传一次
-- 保留 assistant span，同时让 `tool -> skill` 反映 skill 调用关系
-- Stop hook 早于 `task_complete` 写入时的 completed 状态推断
-- 空白启动 turn 过滤，不生成 OTLP span
+- Codex hook rollout parsing and OTLP Trace / Metrics protobuf upload
+- incomplete turns are skipped and uploaded only once after completion
+- assistant spans are preserved while `tool -> skill` nesting reflects skill usage
+- completed status inference when the Stop hook runs before `task_complete` is written
+- blank startup turns are filtered and do not produce OTLP spans
 
-## 排查
+## Troubleshooting
 
-查看 hook 日志：
+Inspect hook logs:
 
 ```bash
 tail -n 100 ~/.codex/gtrace-hook.log
 ```
 
-查看本地 ingest 数据：
+Inspect local ingest data:
 
 ```bash
 curl "http://localhost:3030/traces?limit=20"
@@ -95,26 +95,26 @@ tail -n 20 data/metrics.ndjson
 ls -lt data/batches | head
 ```
 
-查看已上传 turn 标记：
+Inspect uploaded-turn markers:
 
 ```bash
 find ~/.codex/sessions -name "*.gtrace" -type f
 ```
 
-`.gtrace` 文件按行记录 `turnId<TAB>fingerprint`。旧版本留下的纯 `turnId` 行仍会兼容读取。
+Each `.gtrace` file stores `turnId<TAB>fingerprint` per line. Legacy files that contain only `turnId` are still read for compatibility.
 
-查看并发去重锁：
+Inspect concurrency lock files:
 
 ```bash
 find ~/.codex/sessions -name "*.gtrace.lock" -type f
 ```
 
-如果 Stop hook 报错，优先检查：
+If the Stop hook fails, check these first:
 
-- `~/.codex/gtrace.json` 是否启用
-- `endpoint`、`tracePath`、`metricsPath`、`otel_traces_url` 或 `otel_metrics_url` 是否指向正确 OTLP 接口
-- 认证 header 是否正确
-- `~/.codex/gtrace-hook.log` 中的 HTTP 状态码和错误信息
-- 如果看到重复数据，检查 `~/.codex/gtrace-hook.log` 是否存在 `skipped duplicate hook run`，它表示同一个 transcript 的并发 hook 已被锁抑制
-- 再检查对应 transcript 的 `.gtrace` 是否持续增长；当前实现对 `completed` / `cancelled` 终态 turn 采用 `turnId` 去重，终态一旦写入 `.gtrace`，后续即使 fingerprint 漂移也不会再次上传
-- Stop hook 进入解析前会短暂等待 transcript 文件稳定，避免文件尾部尚未刷盘时把同一个已完成 turn 解析成不同 fingerprint
+- whether `~/.codex/gtrace.json` is enabled
+- whether `endpoint`, `tracePath`, `metricsPath`, `otel_traces_url`, or `otel_metrics_url` point to the correct OTLP endpoint
+- whether authentication headers are correct
+- HTTP status codes and error messages in `~/.codex/gtrace-hook.log`
+- if you see duplicate data, check for `skipped duplicate hook run` in `~/.codex/gtrace-hook.log`; that indicates concurrent hooks for the same transcript were suppressed by the lock
+- check whether the matching transcript `.gtrace` keeps growing; terminal `completed` / `cancelled` turns are deduplicated by `turnId`, and once written into `.gtrace` they will not be uploaded again even if the fingerprint changes
+- before parsing, the Stop hook briefly waits for the transcript file to stabilize so the same completed turn is not parsed with multiple fingerprints while the file tail is still being flushed

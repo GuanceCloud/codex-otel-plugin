@@ -1,12 +1,12 @@
-# Metrics 指标设计
+# Metrics Design
 
-本文档说明 codex-otel-plugin 的 OTLP Metrics 指标体系、派生规则、tag 口径和配置约定。
+This document describes the OTLP Metrics model in `codex-otel-plugin`, including derivation rules, tag semantics, and OTLP encoding choices.
 
-当前 Metrics 以平台兼容口径输出；metrics 仍从同批 trace spans 派生，不重新解析 transcript。
+Metrics are derived from the same trace spans produced for a completed Codex hook run. The plugin does not re-parse the transcript separately for metrics.
 
-`gen_ai.input.messages`、`gen_ai.output.messages`、`gen_ai.system_instructions`、`gen_ai.tool.definitions` 和其他请求大字段都只保留在 trace span attributes，本插件当前不会把它们复制为 metrics tags，避免高基数和大字段放大。
+Large request-side fields such as `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, and `gen_ai.tool.definitions` stay on trace span attributes only. They are not copied into metric tags to avoid high cardinality and oversized points.
 
-## 上报链路
+## Upload Pipeline
 
 ```text
 Codex Stop hook
@@ -15,199 +15,200 @@ Codex Stop hook
 src/codex-hook-wrapper.js
     |
     v
-src/codex-collector.js 生成 spans
+src/codex-collector.js builds spans
     |
     v
-src/codex-metrics.js 从 spans 派生 metrics
+src/codex-metrics.js derives metrics from spans
     |
     v
-src/codex-otlp.js / src/proto.js 编码 OTLP Metrics protobuf
+src/codex-otlp.js / src/proto.js encode OTLP Metrics protobuf
     |
     v
 POST <endpoint>/<metricsPath>
 ```
 
-如果 `collectRollout()` 产出的 spans 为空，traces 和 metrics 都不上报。典型场景是只有启动上下文、没有真实用户输入、模型输出、工具调用或 token usage 的空白 turn。
+If `collectRollout()` returns no spans, neither traces nor metrics are uploaded. The common case is a blank turn that contains only startup context and no real user input, model output, tool call, or token usage.
 
-## 指标清单
+## Metric List
 
-| 指标名 | 类型 | 单位 | 来源 | 描述 |
+| Metric | Type | Unit | Source | Description |
 | --- | --- | --- | --- | --- |
-| `gen_ai.workflow.duration` | Histogram | `s` | `invoke_agent` span duration | Codex turn 耗时。 |
-| `gen_ai.agent.operation.count` | Sum | `-` | `llm`、`skill:*`、`tool:*` span | Agent 侧 operation 次数统计。 |
-| `gen_ai.agent.operation.duration` | Histogram | `ms` | `llm`、`skill:*`、`tool:*` span duration | Agent 侧 operation 耗时统计。 |
-| `gen_ai.client.token.usage` | Histogram | `{token}` | `llm` span 的 `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` | 模型调用输入、输出 token 用量。 |
+| `gen_ai.workflow.duration` | Histogram | `s` | `invoke_agent` span duration | Duration of a Codex turn. |
+| `gen_ai.agent.operation.count` | Sum | `-` | `llm`, `skill:*`, and `tool:*` spans | Count of agent-side operations. |
+| `gen_ai.agent.operation.duration` | Histogram | `ms` | `llm`, `skill:*`, and `tool:*` span duration | Duration of agent-side operations. |
+| `gen_ai.client.token.usage` | Histogram | `{token}` | `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` on `llm` spans | Input and output token usage for model calls. |
 
-`gen_ai.agent.operation.count` 和 `gen_ai.agent.operation.duration` 当前只覆盖三类 operation：
+`gen_ai.agent.operation.count` and `gen_ai.agent.operation.duration` currently cover only these operation classes:
 
 - `llm`
 - `skill:*`
 - `tool:*`
 
-对应维度映射：
+Dimension mapping:
 
-- `llm` -> `operation_name=model`，`gen_ai.operation.name=chat`
-- `skill:*` -> `operation_name=skill`，`gen_ai.operation.name=skill`
-- `tool:*` -> `operation_name=tool`，`gen_ai.operation.name=execute_tool`
+- `llm` -> `operation_name=model`, `gen_ai.operation.name=chat`
+- `skill:*` -> `operation_name=skill`, `gen_ai.operation.name=skill`
+- `tool:*` -> `operation_name=tool`, `gen_ai.operation.name=execute_tool`
 
-当前不包含：
+Not included:
 
 - `invoke_agent`
 - `assistant`
 
-其中 `invoke_agent` 只生成 `gen_ai.workflow.duration`；`assistant` 不生成 operation count / duration 或 token usage。
+`invoke_agent` produces only `gen_ai.workflow.duration`. `assistant` produces neither operation count, operation duration, nor token usage metrics.
 
-当前不生成：
+Metrics that are not currently emitted:
 
-- `gen_ai.client.operation.time_to_first_chunk`: Codex rollout 当前没有稳定首 chunk 时间来源。
-- `gen_ai.client.operation.time_per_output_chunk`: Codex Stop hook 只做结束后解析，不做流式 chunk 计时。
-- `gen_ai.server.*`: 本插件采集的是 Codex 客户端侧行为，不是模型服务端。
-- `gen_ai.client.operation.duration`: 已由 `gen_ai.agent.operation.duration` 兼容替代。
+- `gen_ai.client.operation.time_to_first_chunk`: the Codex rollout does not provide a stable first-chunk timestamp
+- `gen_ai.client.operation.time_per_output_chunk`: the Stop hook parses after completion and does not time streaming chunks
+- `gen_ai.server.*`: this plugin observes Codex client-side behavior, not model-server internals
+- `gen_ai.client.operation.duration`: replaced by the compatibility metric `gen_ai.agent.operation.duration`
 
-## Tag 设计
+## Tag Design
 
 ### Resource Attributes
 
-resource attributes 适合放“一个实例/一个 Agent/一个部署周期内相对稳定”的全局 tag。当前默认包含：
+Resource attributes are intended for stable global tags that remain roughly constant for one deployment, one agent instance, or one host lifecycle. By default the plugin includes:
 
-| 字段 | 来源 | 说明 |
+| Field | Source | Notes |
 | --- | --- | --- |
-| `service.name` | 固定值 | 当前为 `gtrace-codex`。 |
-| `telemetry.sdk.language` | 固定值 | 当前为 `nodejs`。 |
-| `telemetry.sdk.name` | 固定值 | 当前为 `gtrace`。 |
-| `telemetry.sdk.version` | 固定值 | 当前插件内置采集版本。 |
-| `host` | 自动采集 | 当前宿主机 hostname。 |
-| `agent_runtime` | 固定值 | 当前为 `codex`。 |
-| `gen_ai.agent.version` | rollout session meta | Codex CLI 版本。 |
-| `runtime_environment` | 配置 `environment` | 运行环境。 |
+| `service.name` | fixed | Always `gtrace-codex` |
+| `telemetry.sdk.language` | fixed | Always `nodejs` |
+| `telemetry.sdk.name` | fixed | Always `gtrace` |
+| `telemetry.sdk.version` | fixed | Built-in plugin collector version |
+| `host` | automatic | Current hostname |
+| `agent_runtime` | fixed | Always `codex` |
+| `gen_ai.agent.version` | rollout session meta | Codex CLI version |
+| `runtime_environment` | config `environment` | Runtime environment |
 
-推荐额外补充：
+Recommended additions:
 
-| 字段 | 说明 |
+| Field | Notes |
 | --- | --- |
-| `deployment.environment` | prod/test/dev 等环境隔离。 |
-| `app_id` | 监测应用或 Agent 应用 ID。 |
-| `app_name` | 页面展示用应用名。 |
-| `agent_type` | Agent 类型，例如 `assistant`、`workflow-agent`。 |
-| `agent_source` | Agent 来源，例如 `codex`、`sdk`、`api`。 |
+| `deployment.environment` | prod / test / dev split |
+| `app_id` | monitored app or agent application ID |
+| `app_name` | display name for the app |
+| `agent_type` | agent type such as `assistant` or `workflow-agent` |
+| `agent_source` | source such as `codex`, `sdk`, or `api` |
 
-`resourceAttributes` 会合并到 trace resource 和 metrics resource。安装脚本的 `--tag KEY=VALUE` 也会写入 `resourceAttributes`。
+`resourceAttributes` are merged into both trace resources and metric resources. The installer flag `--tag KEY=VALUE` also writes into `resourceAttributes`.
 
-### 通用 Tags
+### Common Tags
 
-以下 tags 适用于当前 metrics：
+These tags are applicable to current metrics:
 
-| tag | 来源 | 说明 |
+| Tag | Source | Notes |
 | --- | --- | --- |
-| `gen_ai.conversation.id` | span attributes | Codex session ID，用于和 trace 会话字段对齐。 |
-| `session_id` | span attributes | Codex session ID 兼容字段，值与 `gen_ai.conversation.id` 相同。 |
-| `operation_name` | span attributes | 兼容维度：`model`、`tool`、`skill`。 |
-| `gen_ai.operation.name` | span attributes | GenAI 原始操作名：`chat`、`skill` 或 `execute_tool`；`invoke_agent` 工作流指标默认不带该 tag。 |
-| `outcome` | span attributes | 兼容维度：`completed` 或 `error`。 |
-| `provider_name` | span attributes | `gen_ai.provider.name` 的兼容字段。 |
-| `gen_ai.provider.name` | span attributes | 模型供应商，例如 `openai`。 |
-| `request_model` | span attributes | `gen_ai.request.model` 的兼容字段。 |
-| `gen_ai.request.model` | span attributes | 请求模型名称。 |
-| `response_model` | span attributes | `gen_ai.response.model` 的兼容字段。 |
-| `gen_ai.response.model` | span attributes | 响应模型名称。 |
-| `model_name` | span attributes | 当前取 `response_model`，缺失时回退 `request_model`。 |
-| `error.type` | span attributes | 错误类型；错误时当前为 `_OTHER`。 |
+| `gen_ai.conversation.id` | span attributes | Codex session ID, aligned with trace session fields |
+| `session_id` | span attributes | Compatibility field with the same value as `gen_ai.conversation.id` |
+| `operation_name` | span attributes | Compatibility dimension: `model`, `tool`, `skill` |
+| `gen_ai.operation.name` | span attributes | Canonical operation name: `chat`, `skill`, or `execute_tool`; workflow metrics do not carry it by default |
+| `outcome` | span attributes | Compatibility dimension: `completed` or `error` |
+| `provider_name` | span attributes | Compatibility alias for `gen_ai.provider.name` |
+| `gen_ai.provider.name` | span attributes | Provider name such as `openai` |
+| `request_model` | span attributes | Compatibility alias for `gen_ai.request.model` |
+| `gen_ai.request.model` | span attributes | Requested model name |
+| `response_model` | span attributes | Compatibility alias for `gen_ai.response.model` |
+| `gen_ai.response.model` | span attributes | Response model name |
+| `model_name` | span attributes | Uses `response_model`, falling back to `request_model` |
+| `error.type` | span attributes | Error type, currently `_OTHER` for error cases |
 
-`run_id` 不作为默认 metrics tag。按单次 turn 排查时应优先使用 trace。
+`run_id` is not included as a default metric tag. Use traces first when debugging a single turn.
 
 ### Workflow Tags
 
-`gen_ai.workflow.duration` 额外包含：
+`gen_ai.workflow.duration` additionally includes:
 
-| tag | 来源 | 说明 |
+| Tag | Source | Notes |
 | --- | --- | --- |
-| `final_status` | `invoke_agent.attributes.final_status` | 正常上报路径下为 `completed`、`cancelled` 或 `error`；未完成 `unset` turn 当前不会生成 workflow metric。 |
+| `final_status` | `invoke_agent.attributes.final_status` | Normal uploads use `completed`, `cancelled`, or `error`; unfinished `unset` turns do not currently produce workflow metrics |
 
-### Tool Tags
+### Operation Tags
 
-`gen_ai.agent.operation.count` 和 `gen_ai.agent.operation.duration` 按截图口径输出：
+`gen_ai.agent.operation.count` and `gen_ai.agent.operation.duration` expose these dimensions:
 
-| tag | 来源 | 说明 |
+| Tag | Source | Notes |
 | --- | --- | --- |
-| `agent_runtime` | resource / span | 当前固定为 `codex`。 |
-| `operation_name=model` | `llm` span | 额外携带 `provider_name`、`gen_ai.provider.name`、`request_model`、`gen_ai.request.model`、`response_model`、`gen_ai.response.model`、`model_name`。 |
-| `operation_name=tool` | `tool:*` span | 额外携带 `tool_name`、`gen_ai.tool.name`、`skill_name`、`model_name`、`tool_result_status`。 |
-| `operation_name=skill` | `skill:*` span | 额外携带 `skill_name`、`skill_source`。 |
-| `gen_ai.skill.*` | `skill:*` / `tool:*` span | 继续保留，供 trace / metrics 统一检索。 |
+| `agent_runtime` | resource / span | Always `codex` |
+| `operation_name=model` | `llm` span | Also carries `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `response_model`, `gen_ai.response.model`, and `model_name` |
+| `operation_name=tool` | `tool:*` span | Also carries `tool_name`, `gen_ai.tool.name`, `skill_name`, `model_name`, and `tool_result_status` |
+| `operation_name=skill` | `skill:*` span | Also carries `skill_name` and `skill_source` |
+| `gen_ai.skill.*` | `skill:*` / `tool:*` span | Preserved so trace and metric queries can align |
 
-`skill.description`、`gen_ai.skill.description`、`gen_ai.skill.path` 和 `skill_call_id` 不作为默认 metrics tag，避免引入长文本和高基数字段；这些字段只保留在 trace attributes 中。
+`skill.description`, `gen_ai.skill.description`, `gen_ai.skill.path`, and `skill_call_id` are intentionally excluded from default metric tags to avoid long text and high-cardinality values. They remain available on traces only.
 
-`gen_ai.agent.operation.duration` 在 `operation_name=model` 场景下包含首 token 等待时间。对应等待值保留在 trace attribute `ttft` 中，单位毫秒。
+For `operation_name=model`, `gen_ai.agent.operation.duration` includes TTFT time. The wait value is still preserved separately as trace attribute `ttft`, in milliseconds.
 
 ### Token Tags
 
-`gen_ai.client.token.usage` 额外包含：
+`gen_ai.client.token.usage` additionally includes:
 
-| tag | 说明 |
+| Tag | Notes |
 | --- | --- |
-| `gen_ai.token.type` | `input` 或 `output`。 |
+| `gen_ai.token.type` | `input` or `output` |
 
-token 指标只从 `llm` span 派生，不从 `invoke_agent` 汇总字段派生，避免同一次模型调用被重复计数。
+Token metrics are derived only from `llm` spans, never from aggregated `invoke_agent` usage fields, to avoid double counting the same model call.
 
-## Token 映射
+## Token Mapping
 
-| `llm` span 字段 | Metric | `gen_ai.token.type` | 说明 |
+| `llm` span field | Metric | `gen_ai.token.type` | Notes |
 | --- | --- | --- | --- |
-| `gen_ai.usage.input_tokens` | `gen_ai.client.token.usage` | `input` | 输入 token，包含缓存命中输入 token。 |
-| `gen_ai.usage.output_tokens` | `gen_ai.client.token.usage` | `output` | 输出 token。 |
+| `gen_ai.usage.input_tokens` | `gen_ai.client.token.usage` | `input` | Input tokens, including cache-hit input tokens |
+| `gen_ai.usage.output_tokens` | `gen_ai.client.token.usage` | `output` | Output tokens |
 
-`gen_ai.usage.cache_read.input_tokens` 和 `gen_ai.usage.reasoning.output_tokens` 只保留在 trace span attributes 中，不生成默认 token metric。OpenTelemetry 当前 `gen_ai.token.type` 只定义 `input` 和 `output`，避免继续输出旧的 `cache_read`、`cache_total`、`reasoning`、`total` 自定义 token type。
+`gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.reasoning.output_tokens` remain on trace span attributes only. They do not emit default token metrics. OpenTelemetry currently defines only `input` and `output` for `gen_ai.token.type`, so legacy custom token types such as `cache_read`, `cache_total`, `reasoning`, and `total` are not emitted.
 
-token 值不存在、不是数字或小于等于 0 时，不生成对应 data point。
+If a token value is missing, non-numeric, or less than or equal to zero, the corresponding data point is not generated.
 
-## OTLP 形态
+## OTLP Shape
 
-Metrics 使用 OTLP Metrics HTTP/protobuf 上报：
-  - `gen_ai.agent.operation.count` 使用 OTLP `Sum`
-  - `gen_ai.workflow.duration`、`gen_ai.agent.operation.duration`、`gen_ai.client.token.usage` 使用 OTLP `Histogram`
-  - `aggregationTemporality`: `AGGREGATION_TEMPORALITY_DELTA`
-  - Histogram data point 的 `count=1`
-  - Histogram data point 的 `sum/min/max` 为当前观测值
+Metrics are uploaded through OTLP Metrics HTTP/protobuf:
 
-`gen_ai.agent.operation.duration` bucket：
+- `gen_ai.agent.operation.count` uses OTLP `Sum`
+- `gen_ai.workflow.duration`, `gen_ai.agent.operation.duration`, and `gen_ai.client.token.usage` use OTLP `Histogram`
+- `aggregationTemporality`: `AGGREGATION_TEMPORALITY_DELTA`
+- histogram data points use `count=1`
+- histogram `sum`, `min`, and `max` are the current observation value
+
+`gen_ai.agent.operation.duration` buckets:
 
 ```text
 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240, 20480, 40960, 81920
 ```
 
-`gen_ai.workflow.duration` bucket：
+`gen_ai.workflow.duration` buckets:
 
 ```text
 1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200
 ```
 
-token histogram bucket：
+Token histogram buckets:
 
 ```text
 1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864
 ```
 
-## 指标变更关系
+## Metric Migration Notes
 
-| 旧指标 / tag | 新指标 / tag |
+| Old metric / tag | New metric / tag |
 | --- | --- |
-| `gen_ai.agent.request.count` | 停止输出 |
+| `gen_ai.agent.request.count` | stopped |
 | `gen_ai.agent.request.duration` | `gen_ai.workflow.duration` |
-| `gen_ai.agent.operation.count` | 保留输出 |
-| `gen_ai.agent.operation.duration` | 保留输出 |
+| `gen_ai.agent.operation.count` | preserved |
+| `gen_ai.agent.operation.duration` | preserved |
 | `gen_ai.agent.token.usage` | `gen_ai.client.token.usage` |
-| `session_id` | 兼容保留，同时继续输出 `gen_ai.conversation.id` |
+| `session_id` | still emitted for compatibility, alongside `gen_ai.conversation.id` |
 | `provider_name` | `gen_ai.provider.name` |
-| `model_name` | `gen_ai.request.model`、`gen_ai.response.model` |
+| `model_name` | `gen_ai.request.model`, `gen_ai.response.model` |
 | `operation_name` | `gen_ai.operation.name` |
 | `tool_name` | `gen_ai.tool.name` |
 | `token_type` | `gen_ai.token.type` |
-| `token_type=total/cache_read/cache_total/reasoning` | 停止输出，只保留 trace attributes |
+| `token_type=total/cache_read/cache_total/reasoning` | stopped; kept only on trace attributes |
 | duration unit `ms` | duration unit `s` |
 
-## 配置与调试
+## Config and Debugging
 
-推荐 Dataway/GTrace 配置：
+Recommended Dataway / GTrace config:
 
 ```json
 {
@@ -223,23 +224,17 @@ token histogram bucket：
 }
 ```
 
-本地 server 接口：
+Local server endpoints:
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Notes |
 | --- | --- | --- |
-| `POST` | `/api/public/otel/v1/metrics` | 接收 OTLP Metrics JSON/protobuf。 |
-| `GET` | `/metrics?limit=50` | 查看最近规范化 metric data point。 |
+| `POST` | `/api/public/otel/v1/metrics` | Accept OTLP Metrics JSON/protobuf |
+| `GET` | `/metrics?limit=50` | Inspect recent normalized metric data points |
 
-修改 metrics 指标名、tag、token 映射或 OTLP 编码时，至少同步：
+When changing metric names, tags, token mapping, or OTLP encoding, update at least:
 
 - `src/codex-metrics.js`
 - `src/codex-otlp.js`
 - `src/proto.js`
 - `src/otlp.js`
 - `test/ingest-smoke.test.js`
-- `README.md`
-- `docs/metrics.md`
-- `docs/traces.md`
-- `AGENTS.md`
-
-修改 hook 上报协议时必须验证 OTLP Metrics protobuf 路径，不只验证 JSON 路径。

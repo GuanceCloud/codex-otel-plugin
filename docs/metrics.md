@@ -34,7 +34,7 @@ If `collectRollout()` returns no spans, neither traces nor metrics are uploaded.
 | Metric | Type | Unit | Source | Description |
 | --- | --- | --- | --- | --- |
 | `gen_ai.workflow.duration` | Histogram | `s` | `invoke_agent` span duration | Duration of a Codex turn. |
-| `gen_ai.agent.operation.count` | Sum | `-` | `llm`, `skill:*`, and `tool:*` spans | Count of agent-side operations. |
+| `gen_ai.agent.operation.count` | Sum | `-` | `llm`, `skill:*`, and `tool:*` spans | Count of agent-side operations, aggregated within each turn by operation dimensions. |
 | `gen_ai.agent.operation.duration` | Histogram | `ms` | `llm`, `skill:*`, and `tool:*` span duration | Duration of agent-side operations. |
 | `gen_ai.client.token.usage` | Histogram | `{token}` | `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` on `llm` spans | Input and output token usage for model calls. |
 
@@ -56,6 +56,13 @@ Not included:
 - `assistant`
 
 `invoke_agent` produces only `gen_ai.workflow.duration`. `assistant` produces neither operation count, operation duration, nor token usage metrics.
+
+Count aggregation semantics:
+
+- `gen_ai.agent.operation.count` is not emitted as one point per span anymore.
+- Instead, spans are grouped within the same turn by operation dimensions and then summed.
+- A repeated operation in one turn therefore produces a single count point whose value is greater than `1`.
+- Different turns are kept as separate OTLP data points even when the metric attributes are identical.
 
 Metrics that are not currently emitted:
 
@@ -139,6 +146,8 @@ These tags are applicable to current metrics:
 
 For `operation_name=model`, `gen_ai.agent.operation.duration` includes TTFT time. The wait value is still preserved separately as trace attribute `ttft`, in milliseconds.
 
+`gen_ai.agent.operation.duration` remains span-based. Only `gen_ai.agent.operation.count` is aggregated within a turn.
+
 ### Token Tags
 
 `gen_ai.client.token.usage` additionally includes:
@@ -169,6 +178,8 @@ Metrics are uploaded through OTLP Metrics HTTP/protobuf:
 - `aggregationTemporality`: `AGGREGATION_TEMPORALITY_DELTA`
 - histogram data points use `count=1`
 - histogram `sum`, `min`, and `max` are the current observation value
+
+For `gen_ai.agent.operation.count`, each OTLP data point carries the aggregated count for one turn and one operation-dimension group.
 
 `gen_ai.agent.operation.duration` buckets:
 

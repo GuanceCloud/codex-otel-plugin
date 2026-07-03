@@ -431,7 +431,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(metricResourceAttrs, "app_id"), "codex-monitor");
   assert.equal(attrValue(metricResourceAttrs, "app_name"), "Codex OTEL");
   assert.equal(metricsBatch.metrics[0].resource.app_id, "codex-monitor");
-  assert.equal(metricsBatch.metric_count, 13);
+  assert.equal(metricsBatch.metric_count, 12);
   assert.deepEqual(
     Array.from(new Set(metricsBatch.metrics.map((metric) => metric.name))).sort(),
     [
@@ -445,8 +445,11 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     (metric) => metric.name === "gen_ai.agent.operation.count",
   );
   assert.ok(rawOperationCountMetric?.sum);
-  assert.equal(rawOperationCountMetric.sum.dataPoints[0].asDouble, 1);
-  assert.equal(rawOperationCountMetric.sum.dataPoints[0].asInt, undefined);
+  assert.deepEqual(
+    rawOperationCountMetric.sum.dataPoints.map((point) => point.asDouble).sort((a, b) => a - b),
+    [1, 1, 2],
+  );
+  assert.ok(rawOperationCountMetric.sum.dataPoints.every((point) => point.asInt === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes["gen_ai.conversation.id"] === "sess-basic"));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.session_key === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes.run_id === undefined));
@@ -1162,6 +1165,123 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.ok(toolOperationCount);
   assert.equal(toolOperationCount.value, 1);
   assert.equal(toolOperationCount.attributes.skill_name, "dashboard");
+});
+
+test("buildCodexMetrics aggregates operation count within the same turn", () => {
+  const spans = [
+    {
+      name: "llm",
+      start_time_unix_nano: "100",
+      end_time_unix_nano: "200",
+      duration_ms: 100,
+      attributes: {
+        run_id: "turn-1",
+        "gen_ai.conversation.id": "sess-1",
+        session_id: "sess-1",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "openai",
+        "gen_ai.request.model": "gpt-5.5",
+        "gen_ai.response.model": "gpt-5.5",
+      },
+      resource: { agent_runtime: "codex" },
+      scope: { name: "test", version: "1" },
+      status: { code: "STATUS_CODE_UNSET" },
+    },
+    {
+      name: "llm",
+      start_time_unix_nano: "210",
+      end_time_unix_nano: "310",
+      duration_ms: 100,
+      attributes: {
+        run_id: "turn-1",
+        "gen_ai.conversation.id": "sess-1",
+        session_id: "sess-1",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "openai",
+        "gen_ai.request.model": "gpt-5.5",
+        "gen_ai.response.model": "gpt-5.5",
+      },
+      resource: { agent_runtime: "codex" },
+      scope: { name: "test", version: "1" },
+      status: { code: "STATUS_CODE_UNSET" },
+    },
+    {
+      name: "tool:exec_command",
+      start_time_unix_nano: "320",
+      end_time_unix_nano: "420",
+      duration_ms: 100,
+      attributes: {
+        run_id: "turn-1",
+        "gen_ai.conversation.id": "sess-1",
+        session_id: "sess-1",
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.provider.name": "openai",
+        "gen_ai.request.model": "gpt-5.5",
+        "gen_ai.response.model": "gpt-5.5",
+        "gen_ai.tool.name": "exec_command",
+      },
+      resource: { agent_runtime: "codex" },
+      scope: { name: "test", version: "1" },
+      status: { code: "STATUS_CODE_UNSET" },
+    },
+    {
+      name: "tool:exec_command",
+      start_time_unix_nano: "430",
+      end_time_unix_nano: "530",
+      duration_ms: 100,
+      attributes: {
+        run_id: "turn-1",
+        "gen_ai.conversation.id": "sess-1",
+        session_id: "sess-1",
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.provider.name": "openai",
+        "gen_ai.request.model": "gpt-5.5",
+        "gen_ai.response.model": "gpt-5.5",
+        "gen_ai.tool.name": "exec_command",
+      },
+      resource: { agent_runtime: "codex" },
+      scope: { name: "test", version: "1" },
+      status: { code: "STATUS_CODE_UNSET" },
+    },
+    {
+      name: "tool:exec_command",
+      start_time_unix_nano: "540",
+      end_time_unix_nano: "640",
+      duration_ms: 100,
+      attributes: {
+        run_id: "turn-2",
+        "gen_ai.conversation.id": "sess-1",
+        session_id: "sess-1",
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.provider.name": "openai",
+        "gen_ai.request.model": "gpt-5.5",
+        "gen_ai.response.model": "gpt-5.5",
+        "gen_ai.tool.name": "exec_command",
+      },
+      resource: { agent_runtime: "codex" },
+      scope: { name: "test", version: "1" },
+      status: { code: "STATUS_CODE_UNSET" },
+    },
+  ];
+
+  const metrics = buildCodexMetrics(spans);
+  const modelCounts = metrics.filter(
+    (metric) => metric.name === "gen_ai.agent.operation.count" && metric.attributes.operation_name === "model",
+  );
+  const toolCounts = metrics.filter(
+    (metric) => metric.name === "gen_ai.agent.operation.count" && metric.attributes.operation_name === "tool",
+  );
+
+  assert.equal(modelCounts.length, 1);
+  assert.equal(modelCounts[0].value, 2);
+  assert.equal(modelCounts[0].start_time_unix_nano, "100");
+  assert.equal(modelCounts[0].time_unix_nano, "310");
+
+  assert.equal(toolCounts.length, 2);
+  assert.deepEqual(
+    toolCounts.map((metric) => metric.value).sort((a, b) => a - b),
+    [1, 2],
+  );
 });
 
 test("Codex collector skips blank turns that only contain startup context", async () => {

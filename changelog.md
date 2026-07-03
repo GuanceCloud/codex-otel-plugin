@@ -4,6 +4,10 @@
 
 ## 2026-07-02
 
+- 发布 `v0.1.8`
+- 将 `gen_ai.agent.operation.count` 从逐 span 上报改为按 turn 内 operation 维度聚合后上报
+- 明确文档口径：`gen_ai.agent.operation.count` 为 turn 内聚合值，`gen_ai.agent.operation.duration` 仍按 span 上报
+
 - 发布 `v0.1.7`
 - 将 `gen_ai.agent.operation.count` 的 OTLP Sum data point 编码改为 `asDouble`，兼容目标端对计数指标的识别
 - 补充 metrics 文档，明确 operation 指标只覆盖 `llm`、`skill:*`、`tool:*`，不包含 `invoke_agent`、`assistant`

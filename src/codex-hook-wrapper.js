@@ -189,6 +189,9 @@ export async function runHook(options = {}) {
 
     const metrics = buildCodexMetrics(result.spans);
     if (metrics.length > 0) {
+      if (config.debug) {
+        await appendLog(config, "metrics payload", { metrics });
+      }
       const metricsResponse = await uploadMetrics(config, metrics);
       await appendLog(config, "uploaded metrics", { ...metricsResponse, metrics: metrics.length });
     }

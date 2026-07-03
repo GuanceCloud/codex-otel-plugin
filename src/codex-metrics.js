@@ -110,50 +110,34 @@ function metric(meta, span, value, attributes) {
   };
 }
 
-function maxTime(a, b) {
-  if (!a) return b;
-  if (!b) return a;
-  try {
-    return BigInt(a) >= BigInt(b) ? a : b;
-  } catch {
-    return a;
-  }
-}
+function countAttrs(span) {
+  const attributes = {
+    agent_runtime: span.resource?.agent_runtime,
+    "gen_ai.conversation.id": span.attributes?.["gen_ai.conversation.id"],
+    session_id: span.attributes?.session_id ?? span.attributes?.["gen_ai.conversation.id"],
+    "gen_ai.operation.name": span.attributes?.["gen_ai.operation.name"],
+    outcome: operationOutcome(span),
+  };
+  if (operationOutcome(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
 
-function minTime(a, b) {
-  if (!a) return b;
-  if (!b) return a;
-  try {
-    return BigInt(a) <= BigInt(b) ? a : b;
-  } catch {
-    return a;
-  }
-}
-
-function operationCountGroupKey(span, attributes) {
-  return JSON.stringify({
-    run_id: span.attributes?.run_id ?? null,
-    resource: span.resource ?? {},
-    scope: span.scope ?? {},
-    attributes,
-  });
-}
-
-function addOperationCount(groups, span, attributes) {
-  const key = operationCountGroupKey(span, attributes);
-  const pointTime = span.end_time_unix_nano ?? span.start_time_unix_nano;
-  if (!groups.has(key)) {
-    groups.set(
-      key,
-      metric(OPERATION_COUNT, span, 1, attributes),
-    );
-    return;
+  if (span.name === "llm") {
+    setAttr(attributes, "gen_ai.provider.name", span.attributes?.["gen_ai.provider.name"]);
+    setAttr(attributes, "gen_ai.request.model", span.attributes?.["gen_ai.request.model"]);
+    setAttr(attributes, "gen_ai.response.model", span.attributes?.["gen_ai.response.model"]);
+    return attributes;
   }
 
-  const current = groups.get(key);
-  current.value += 1;
-  current.start_time_unix_nano = minTime(current.start_time_unix_nano, span.start_time_unix_nano);
-  current.time_unix_nano = maxTime(current.time_unix_nano, pointTime);
+  if (String(span.name).startsWith("tool:")) {
+    setAttr(attributes, "gen_ai.tool.name", span.attributes?.["gen_ai.tool.name"] ?? String(span.name ?? "").replace(/^tool:/, ""));
+    return attributes;
+  }
+
+  if (String(span.name).startsWith("skill:")) {
+    setAttr(attributes, "gen_ai.skill.name", span.attributes?.["gen_ai.skill.name"] ?? span.attributes?.["skill.name"]);
+    return attributes;
+  }
+
+  return attributes;
 }
 
 function requestMetrics(span) {
@@ -169,7 +153,7 @@ function requestMetrics(span) {
   return duration === undefined ? [] : [metric(WORKFLOW_DURATION, span, duration, attributes)];
 }
 
-function skillMetrics(span, operationCountGroups) {
+function skillMetrics(span) {
   const attributes = {
     ...baseAttrs(span),
   };
@@ -184,20 +168,18 @@ function skillMetrics(span, operationCountGroups) {
   setAttr(attributes, "gen_ai.skill.version", span.attributes?.["gen_ai.skill.version"]);
   if (operationOutcome(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
 
-  addOperationCount(operationCountGroups, span, attributes);
-  const out = [];
+  const out = [metric(OPERATION_COUNT, span, 1, countAttrs(span))];
   const durationMs = finitePositive(span.duration_ms);
   if (durationMs !== undefined) out.push(metric(OPERATION_DURATION, span, durationMs, attributes));
   return out;
 }
 
-function llmMetrics(span, operationCountGroups) {
+function llmMetrics(span) {
   const operationAttributes = {
     ...baseAttrs(span),
   };
   if (operationOutcome(span) === "error") setAttr(operationAttributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
-  addOperationCount(operationCountGroups, span, operationAttributes);
-  const out = [];
+  const out = [metric(OPERATION_COUNT, span, 1, countAttrs(span))];
   const durationMs = finitePositive(span.duration_ms);
   if (durationMs !== undefined) out.push(metric(OPERATION_DURATION, span, durationMs, operationAttributes));
 
@@ -214,7 +196,7 @@ function llmMetrics(span, operationCountGroups) {
   return out;
 }
 
-function toolMetrics(span, operationCountGroups) {
+function toolMetrics(span) {
   const attributes = {
     ...baseAttrs(span),
   };
@@ -232,8 +214,7 @@ function toolMetrics(span, operationCountGroups) {
   setAttr(attributes, "gen_ai.skill.version", span.attributes?.["gen_ai.skill.version"]);
   setAttr(attributes, "tool_result_status", span.attributes?.tool_result_status);
 
-  addOperationCount(operationCountGroups, span, attributes);
-  const out = [];
+  const out = [metric(OPERATION_COUNT, span, 1, countAttrs(span))];
   const durationMs = finitePositive(span.duration_ms);
   if (durationMs !== undefined) out.push(metric(OPERATION_DURATION, span, durationMs, attributes));
   return out;
@@ -241,13 +222,11 @@ function toolMetrics(span, operationCountGroups) {
 
 export function buildCodexMetrics(spans = []) {
   const metrics = [];
-  const operationCountGroups = new Map();
   for (const span of spans) {
     if (span.name === "invoke_agent") metrics.push(...requestMetrics(span));
-    else if (String(span.name).startsWith("skill:")) metrics.push(...skillMetrics(span, operationCountGroups));
-    else if (span.name === "llm") metrics.push(...llmMetrics(span, operationCountGroups));
-    else if (String(span.name).startsWith("tool:")) metrics.push(...toolMetrics(span, operationCountGroups));
+    else if (String(span.name).startsWith("skill:")) metrics.push(...skillMetrics(span));
+    else if (span.name === "llm") metrics.push(...llmMetrics(span));
+    else if (String(span.name).startsWith("tool:")) metrics.push(...toolMetrics(span));
   }
-  metrics.unshift(...operationCountGroups.values());
   return metrics;
 }

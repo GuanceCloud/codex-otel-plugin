@@ -80,6 +80,8 @@ Compatible config fields:
 
 `timeout_ms` is the timeout for a single HTTP request. The default is `25000` milliseconds. Traces and metrics are uploaded as separate requests. Increase this value if your receiver is slow.
 
+When `debug` is set to `true`, the hook also writes the prepared metric payload into `~/.codex/gtrace-hook.log` before upload, including full metric attributes.
+
 ## Authentication
 
 Basic Auth is supported:

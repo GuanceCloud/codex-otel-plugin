@@ -5,8 +5,8 @@
 ## 2026-07-02
 
 - 发布 `v0.1.8`
-- 将 `gen_ai.agent.operation.count` 从逐 span 上报改为按 turn 内 operation 维度聚合后上报
-- 明确文档口径：`gen_ai.agent.operation.count` 为 turn 内聚合值，`gen_ai.agent.operation.duration` 仍按 span 上报
+- 调整 `gen_ai.agent.operation.count`：恢复按 span 上报，移除 `operation_name`，并精简 count attrs
+- 当 `debug=true` 时，在 hook 日志中输出完整 metrics payload，包含完整 metric attrs/resource tags
 
 - 发布 `v0.1.7`
 - 将 `gen_ai.agent.operation.count` 的 OTLP Sum data point 编码改为 `asDouble`，兼容目标端对计数指标的识别

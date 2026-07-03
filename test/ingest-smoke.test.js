@@ -173,9 +173,13 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(await readFile(`${rollout}.gtrace`, "utf-8"), /turn-1/);
-  assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /hook invoked/);
-  assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /uploaded spans/);
-  assert.match(await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8"), /uploaded metrics/);
+  const hookLog = await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8");
+  assert.match(hookLog, /hook invoked/);
+  assert.match(hookLog, /uploaded spans/);
+  assert.match(hookLog, /metrics payload/);
+  assert.match(hookLog, /gen_ai\.agent\.operation\.count/);
+  assert.match(hookLog, /gen_ai\.conversation\.id/);
+  assert.match(hookLog, /uploaded metrics/);
 
   const batch = await latestTraceBatch();
   const uploadedSpans = batch.raw_request.resourceSpans[0].scopeSpans[0].spans;
@@ -431,7 +435,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(metricResourceAttrs, "app_id"), "codex-monitor");
   assert.equal(attrValue(metricResourceAttrs, "app_name"), "Codex OTEL");
   assert.equal(metricsBatch.metrics[0].resource.app_id, "codex-monitor");
-  assert.equal(metricsBatch.metric_count, 12);
+  assert.equal(metricsBatch.metric_count, 13);
   assert.deepEqual(
     Array.from(new Set(metricsBatch.metrics.map((metric) => metric.name))).sort(),
     [
@@ -447,7 +451,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.ok(rawOperationCountMetric?.sum);
   assert.deepEqual(
     rawOperationCountMetric.sum.dataPoints.map((point) => point.asDouble).sort((a, b) => a - b),
-    [1, 1, 2],
+    [1, 1, 1, 1],
   );
   assert.ok(rawOperationCountMetric.sum.dataPoints.every((point) => point.asInt === undefined));
   assert.ok(metricsBatch.metrics.every((metric) => metric.attributes["gen_ai.conversation.id"] === "sess-basic"));
@@ -504,11 +508,12 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   const skillOperationCount = metricsBatch.metrics.find(
     (metric) =>
       metric.name === "gen_ai.agent.operation.count" &&
-      metric.attributes.operation_name === "skill" &&
-      metric.attributes.skill_name === "plugin-creator",
+      metric.attributes["gen_ai.operation.name"] === "skill" &&
+      metric.attributes["gen_ai.skill.name"] === "plugin-creator",
   );
   assert.equal(skillOperationCount.value, 1);
-  assert.equal(skillOperationCount.attributes.skill_source, "system");
+  assert.equal(skillOperationCount.attributes["gen_ai.skill.name"], "plugin-creator");
+  assert.equal(skillOperationCount.attributes["gen_ai.skill.source.type"], undefined);
   const toolOperation = metricsBatch.metrics.find(
     (metric) =>
       metric.name === "gen_ai.agent.operation.duration" &&
@@ -526,11 +531,14 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   const toolOperationCount = metricsBatch.metrics.find(
     (metric) =>
       metric.name === "gen_ai.agent.operation.count" &&
-      metric.attributes.operation_name === "tool" &&
-      metric.attributes.tool_name === "exec_command",
+      metric.attributes["gen_ai.operation.name"] === "execute_tool" &&
+      metric.attributes["gen_ai.tool.name"] === "exec_command",
   );
   assert.equal(toolOperationCount.value, 1);
-  assert.equal(toolOperationCount.attributes.skill_name, "plugin-creator");
+  assert.equal(toolOperationCount.attributes["gen_ai.tool.name"], "exec_command");
+  assert.equal(toolOperationCount.attributes.operation_name, undefined);
+  assert.equal(toolOperationCount.attributes["gen_ai.request.model"], undefined);
+  assert.equal(toolOperationCount.attributes["gen_ai.skill.name"], undefined);
 
   const listedMetrics = await fetch(`${baseUrl}/metrics?limit=20`).then((res) => res.json());
   assert.ok(listedMetrics.data.some((metric) => metric.name === "gen_ai.client.token.usage"));
@@ -1126,14 +1134,14 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   const toolOperationCount = metrics.find(
     (metric) =>
       metric.name === "gen_ai.agent.operation.count" &&
-      metric.attributes.operation_name === "tool" &&
-      metric.attributes.skill_name === "dashboard",
+      metric.attributes["gen_ai.operation.name"] === "execute_tool" &&
+      metric.attributes["gen_ai.tool.name"] === "exec_command",
   );
   const skillOperationCount = metrics.find(
     (metric) =>
       metric.name === "gen_ai.agent.operation.count" &&
-      metric.attributes.operation_name === "skill" &&
-      metric.attributes.skill_name === "dashboard",
+      metric.attributes["gen_ai.operation.name"] === "skill" &&
+      metric.attributes["gen_ai.skill.name"] === "dashboard",
   );
   assert.equal(skillWorkflow, undefined);
   assert.ok(skillOperation);
@@ -1149,7 +1157,7 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(skillOperation.attributes.skill_call_id, undefined);
   assert.ok(skillOperationCount);
   assert.equal(skillOperationCount.value, 1);
-  assert.equal(skillOperationCount.attributes.skill_source, "user");
+  assert.equal(skillOperationCount.attributes["gen_ai.skill.name"], "dashboard");
   assert.ok(toolOperation);
   assert.equal(toolOperation.unit, "ms");
   assert.equal(toolOperation.attributes.operation_name, "tool");
@@ -1164,10 +1172,11 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(toolOperation.attributes.tool_result_status, "completed");
   assert.ok(toolOperationCount);
   assert.equal(toolOperationCount.value, 1);
-  assert.equal(toolOperationCount.attributes.skill_name, "dashboard");
+  assert.equal(toolOperationCount.attributes["gen_ai.tool.name"], "exec_command");
+  assert.equal(toolOperationCount.attributes["gen_ai.skill.name"], undefined);
 });
 
-test("buildCodexMetrics aggregates operation count within the same turn", () => {
+test("buildCodexMetrics emits one operation count point per operation span", () => {
   const spans = [
     {
       name: "llm",
@@ -1266,22 +1275,16 @@ test("buildCodexMetrics aggregates operation count within the same turn", () => 
 
   const metrics = buildCodexMetrics(spans);
   const modelCounts = metrics.filter(
-    (metric) => metric.name === "gen_ai.agent.operation.count" && metric.attributes.operation_name === "model",
+    (metric) => metric.name === "gen_ai.agent.operation.count" && metric.attributes["gen_ai.operation.name"] === "chat",
   );
   const toolCounts = metrics.filter(
-    (metric) => metric.name === "gen_ai.agent.operation.count" && metric.attributes.operation_name === "tool",
+    (metric) => metric.name === "gen_ai.agent.operation.count" && metric.attributes["gen_ai.operation.name"] === "execute_tool",
   );
 
-  assert.equal(modelCounts.length, 1);
-  assert.equal(modelCounts[0].value, 2);
-  assert.equal(modelCounts[0].start_time_unix_nano, "100");
-  assert.equal(modelCounts[0].time_unix_nano, "310");
-
-  assert.equal(toolCounts.length, 2);
-  assert.deepEqual(
-    toolCounts.map((metric) => metric.value).sort((a, b) => a - b),
-    [1, 2],
-  );
+  assert.equal(modelCounts.length, 2);
+  assert.ok(modelCounts.every((metric) => metric.value === 1));
+  assert.equal(toolCounts.length, 3);
+  assert.ok(toolCounts.every((metric) => metric.value === 1));
 });
 
 test("Codex collector skips blank turns that only contain startup context", async () => {

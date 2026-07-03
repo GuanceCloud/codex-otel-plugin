@@ -34,7 +34,7 @@ If `collectRollout()` returns no spans, neither traces nor metrics are uploaded.
 | Metric | Type | Unit | Source | Description |
 | --- | --- | --- | --- | --- |
 | `gen_ai.workflow.duration` | Histogram | `s` | `invoke_agent` span duration | Duration of a Codex turn. |
-| `gen_ai.agent.operation.count` | Sum | `-` | `llm`, `skill:*`, and `tool:*` spans | Count of agent-side operations, aggregated within each turn by operation dimensions. |
+| `gen_ai.agent.operation.count` | Sum | `-` | `llm`, `skill:*`, and `tool:*` spans | Count of agent-side operations. One data point is emitted per operation span. |
 | `gen_ai.agent.operation.duration` | Histogram | `ms` | `llm`, `skill:*`, and `tool:*` span duration | Duration of agent-side operations. |
 | `gen_ai.client.token.usage` | Histogram | `{token}` | `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` on `llm` spans | Input and output token usage for model calls. |
 
@@ -46,9 +46,9 @@ If `collectRollout()` returns no spans, neither traces nor metrics are uploaded.
 
 Dimension mapping:
 
-- `llm` -> `operation_name=model`, `gen_ai.operation.name=chat`
-- `skill:*` -> `operation_name=skill`, `gen_ai.operation.name=skill`
-- `tool:*` -> `operation_name=tool`, `gen_ai.operation.name=execute_tool`
+- `llm` -> `gen_ai.operation.name=chat`
+- `skill:*` -> `gen_ai.operation.name=skill`
+- `tool:*` -> `gen_ai.operation.name=execute_tool`
 
 Not included:
 
@@ -57,12 +57,11 @@ Not included:
 
 `invoke_agent` produces only `gen_ai.workflow.duration`. `assistant` produces neither operation count, operation duration, nor token usage metrics.
 
-Count aggregation semantics:
+Count emission semantics:
 
-- `gen_ai.agent.operation.count` is not emitted as one point per span anymore.
-- Instead, spans are grouped within the same turn by operation dimensions and then summed.
-- A repeated operation in one turn therefore produces a single count point whose value is greater than `1`.
-- Different turns are kept as separate OTLP data points even when the metric attributes are identical.
+- `gen_ai.agent.operation.count` is emitted once per `llm`, `tool:*`, or `skill:*` span.
+- Each count data point currently has value `1`.
+- Repeated operations are counted by summing points in downstream queries.
 
 Metrics that are not currently emitted:
 
@@ -108,7 +107,6 @@ These tags are applicable to current metrics:
 | --- | --- | --- |
 | `gen_ai.conversation.id` | span attributes | Codex session ID, aligned with trace session fields |
 | `session_id` | span attributes | Compatibility field with the same value as `gen_ai.conversation.id` |
-| `operation_name` | span attributes | Compatibility dimension: `model`, `tool`, `skill` |
 | `gen_ai.operation.name` | span attributes | Canonical operation name: `chat`, `skill`, or `execute_tool`; workflow metrics do not carry it by default |
 | `outcome` | span attributes | Compatibility dimension: `completed` or `error` |
 | `provider_name` | span attributes | Compatibility alias for `gen_ai.provider.name` |
@@ -137,16 +135,14 @@ These tags are applicable to current metrics:
 | Tag | Source | Notes |
 | --- | --- | --- |
 | `agent_runtime` | resource / span | Always `codex` |
-| `operation_name=model` | `llm` span | Also carries `provider_name`, `gen_ai.provider.name`, `request_model`, `gen_ai.request.model`, `response_model`, `gen_ai.response.model`, and `model_name` |
-| `operation_name=tool` | `tool:*` span | Also carries `tool_name`, `gen_ai.tool.name`, `skill_name`, `model_name`, and `tool_result_status` |
-| `operation_name=skill` | `skill:*` span | Also carries `skill_name` and `skill_source` |
+| `gen_ai.operation.name=chat` | `llm` span | Count tags keep only `gen_ai.provider.name`, `gen_ai.request.model`, and `gen_ai.response.model`; duration tags still keep the richer compatibility fields |
+| `gen_ai.operation.name=execute_tool` | `tool:*` span | Count tags keep only `gen_ai.tool.name`; duration tags still keep tool, model, and skill-related compatibility fields |
+| `gen_ai.operation.name=skill` | `skill:*` span | Count tags keep only `gen_ai.skill.name`; duration tags still keep the richer skill-related fields |
 | `gen_ai.skill.*` | `skill:*` / `tool:*` span | Preserved so trace and metric queries can align |
 
 `skill.description`, `gen_ai.skill.description`, `gen_ai.skill.path`, and `skill_call_id` are intentionally excluded from default metric tags to avoid long text and high-cardinality values. They remain available on traces only.
 
 For `operation_name=model`, `gen_ai.agent.operation.duration` includes TTFT time. The wait value is still preserved separately as trace attribute `ttft`, in milliseconds.
-
-`gen_ai.agent.operation.duration` remains span-based. Only `gen_ai.agent.operation.count` is aggregated within a turn.
 
 ### Token Tags
 
@@ -179,7 +175,7 @@ Metrics are uploaded through OTLP Metrics HTTP/protobuf:
 - histogram data points use `count=1`
 - histogram `sum`, `min`, and `max` are the current observation value
 
-For `gen_ai.agent.operation.count`, each OTLP data point carries the aggregated count for one turn and one operation-dimension group.
+For `gen_ai.agent.operation.count`, each OTLP data point represents one operation span and carries value `1`.
 
 `gen_ai.agent.operation.duration` buckets:
 

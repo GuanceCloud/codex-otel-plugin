@@ -8,6 +8,7 @@ The current implementation uses only built-in Node.js modules and has no runtime
 
 - Collect Codex turns, model calls, skill resource usage, tool calls, structured input/output messages, request parameters, and token usage.
 - Emit five span classes: `invoke_agent`, `llm`, `assistant`, `skill:<name>`, and `tool:<name>`.
+- Merge repeated reads of the same skill directory inside one `llm` step into a single `skill:<name>` span while keeping each underlying tool call span.
 - Upload both OTLP Traces and OTLP Metrics over HTTP/protobuf.
 - Derive metrics from the same trace spans and upload them at the same time as traces, without periodic flushing.
 - Support Dataway / GTrace-style `endpoint + tracePath + metricsPath + headers` configuration.

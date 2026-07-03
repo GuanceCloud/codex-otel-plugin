@@ -619,6 +619,20 @@ function buildSkillContexts(toolCalls = []) {
   };
 }
 
+function mergeSkillOutputPreview(toolCalls, maxChars) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
+  if (toolCalls.length === 1) return preview(toText(toolCalls[0]?.output), maxChars);
+
+  const outputs = toolCalls
+    .map((tc) => ({
+      name: tc?.name,
+      output: tc?.output != null ? clipValue(toText(tc.output), maxChars) : undefined,
+      ...(tc?.error ? { error: clipValue(tc.error, maxChars) } : {}),
+    }))
+    .filter((entry) => entry.output !== undefined || entry.error !== undefined);
+  return outputs.length > 0 ? preview(outputs, maxChars) : undefined;
+}
+
 async function populateTurnSkillMetadata(turn, cache) {
   if (!cache) return;
   for (const step of turn.steps ?? []) {
@@ -770,6 +784,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   turn.steps.forEach((step, index) => {
     const generationSpanId = randomSpanId();
     const { toolCallToSkill } = buildSkillContexts(step.toolCalls);
+    const skillGroups = new Map();
     const usage = usageDetails(step.usage);
     const llmRequestStart = llmRequestStartTime(turn, turn.steps, index);
     const ttft =
@@ -918,33 +933,67 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       );
 
       if (!skill) continue;
+      const skillKey = skill.rootPath ?? skill.skillFile ?? skill.skillName;
+      if (!skillGroups.has(skillKey)) {
+        skillGroups.set(skillKey, {
+          skill,
+          metadata: skillMetadata,
+          toolSpans: [],
+          toolCalls: [],
+        });
+      }
+      const group = skillGroups.get(skillKey);
+      group.toolSpans.push({ spanId: toolSpanId, toolCall: tc });
+      group.toolCalls.push(tc);
+      if (!group.metadata && skillMetadata) group.metadata = skillMetadata;
+    }
 
+    for (const group of skillGroups.values()) {
+      const { skill, metadata, toolSpans, toolCalls } = group;
+      const hasError = toolCalls.some((tc) => tc.error);
+      const firstStart = Math.min(...toolCalls.map((tc) => tc.startTime));
+      const lastEnd = Math.max(...toolCalls.map((tc) => tc.endTime ?? step.endTime));
+      const singleTool = toolSpans.length === 1 ? toolSpans[0] : undefined;
       const skillAttributes = commonAttributes(config, sessionMeta);
       setAttr(skillAttributes, "run_id", turn.turnId);
       setAttr(skillAttributes, "run_ids", turn.turnId);
       setAttr(skillAttributes, ATTR.operationName, "skill");
       setAttr(skillAttributes, ATTR.providerName, sessionMeta.modelProvider);
       setModelAttrs(skillAttributes, turn.model);
-      setSkillAttributes(skillAttributes, skill, skillMetadata, tc.error ? "error" : "completed", tc.callId, maxChars);
-      setAttr(skillAttributes, "tool_count", 1);
+      setSkillAttributes(
+        skillAttributes,
+        skill,
+        metadata,
+        hasError ? "error" : "completed",
+        singleTool?.toolCall?.callId,
+        maxChars,
+      );
+      setAttr(skillAttributes, "tool_count", toolSpans.length);
       setAttr(skillAttributes, "input_preview", preview(skill.skillFile, maxChars));
-      setAttr(skillAttributes, "output_preview", preview(toText(tc.output), maxChars));
-      setAttr(skillAttributes, "status", tc.error ? "error" : "ok");
-      setAttr(skillAttributes, "reason", tc.error ? clipValue(tc.error, maxChars) : undefined);
-      setAttr(skillAttributes, "error.type", tc.error ? "_OTHER" : undefined);
+      setAttr(skillAttributes, "output_preview", mergeSkillOutputPreview(toolCalls, maxChars));
+      setAttr(skillAttributes, "status", hasError ? "error" : "ok");
+      setAttr(
+        skillAttributes,
+        "reason",
+        hasError ? clipValue(toolCalls.map((tc) => tc.error).filter(Boolean).join("\n"), maxChars) : undefined,
+      );
+      setAttr(skillAttributes, "error.type", hasError ? "_OTHER" : undefined);
 
       spans.push(
         makeSpan({
           traceId,
-          parentId: toolSpanId,
+          parentId: singleTool ? singleTool.spanId : generationSpanId,
           name: `skill:${skill.skillName}`,
-          start: tc.startTime,
-          end: tc.endTime ?? step.endTime,
+          start: firstStart,
+          end: lastEnd,
           attributes: skillAttributes,
           resource,
           scope,
           ingest,
-          status: { code: tc.error ? "STATUS_CODE_ERROR" : "STATUS_CODE_UNSET", message: tc.error },
+          status: {
+            code: hasError ? "STATUS_CODE_ERROR" : "STATUS_CODE_UNSET",
+            message: hasError ? toolCalls.map((tc) => tc.error).filter(Boolean).join("\n") : undefined,
+          },
         }),
       );
     }

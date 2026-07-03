@@ -140,9 +140,9 @@ docs/traces.md
 - 根 span name 是 `invoke_agent`
 - 模型调用 span name 是 `llm`
 - 助手消息 span name 是 `assistant`，parent 是对应的 `llm` span
-- skill span name 是 `skill:<name>`，当前只在高置信度识别到 skill 目录资源访问时生成；若已归属到某个工具调用，则 parent 是对应的 `tool:<name>`
+- skill span name 是 `skill:<name>`，当前只在高置信度识别到 skill 目录资源访问时生成；单个 tool 归属 skill 时 parent 是对应的 `tool:<name>`；若同一个 `llm` step 内多个 tool 都命中同一 skill 目录，则合并为一个 skill span 并直接挂到该 `llm`
 - 工具调用 span name 是 `tool:<name>`
-- 若工具调用已归属到某个 skill，则 `skill:<name>` parent 是对应的 `tool:<name>`，`tool:<name>` 仍直接挂到 `llm`
+- 若工具调用已归属到某个 skill，则 `tool:<name>` 仍直接挂到 `llm`；skill span 默认挂到对应 tool，下同一步多 tool 命中同一 skill 时聚合为一个 skill span 并挂到 `llm`
 - 工具命令字段使用 `tool_command`，从 `args.cmd` 或 `args.command` 提取
 - 字段优先使用 OpenTelemetry GenAI semantic conventions
 - `invoke_agent` 额外包含 `session_create_at`、`session_updated_at`、`session_channel`

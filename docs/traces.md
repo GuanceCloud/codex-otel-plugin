@@ -24,7 +24,7 @@ Span relationships:
 - `llm` is a single model call. Its parent is `invoke_agent`, and it maps to `gen_ai.operation.name=chat`.
 - `assistant` is a single assistant message output. Its parent is the matching `llm` span, and it does not carry token usage.
 - `tool:<name>` is a single tool call. Its parent is the `llm` span that triggered it, and it maps to `gen_ai.operation.name=execute_tool`.
-- `skill:<name>` is a span that represents skill resource usage. When a tool call is confidently identified as reading `SKILL.md` or related files under the same skill directory, the corresponding `skill:*` span is created under that `tool:*` span. It uses `gen_ai.operation.name=skill`.
+- `skill:<name>` is a span that represents skill resource usage. When a tool call is confidently identified as reading `SKILL.md` or related files under the same skill directory, the corresponding `skill:*` span is created. A single matching tool keeps the `skill:*` span under that `tool:*` span. If multiple tool calls in the same `llm` step hit the same skill directory, they are merged into one `skill:*` span under the `llm` span to avoid duplicate skill records. It uses `gen_ai.operation.name=skill`.
 - If a tool call cannot be confidently attributed to a skill, only the `tool:*` span is kept.
 - The `llm` span end time is extended to cover assistant / tool child nodes so the parent span does not appear as `0ns` while children still have duration.
 
@@ -33,7 +33,7 @@ Span relationships:
 Codex transcripts do not currently contain a native `skill_invoked` event. The plugin therefore uses high-confidence detection only:
 
 - If tool arguments directly contain a `.../SKILL.md` path, create the matching `skill:<name>` span.
-- If later tool arguments within the same `llm` step keep accessing files under the same skill directory, attach them to that `skill:<name>` span.
+- If later tool arguments within the same `llm` step keep accessing files under the same skill directory, merge them into the same `skill:<name>` span instead of creating another skill span.
 - If the transcript only mentions a skill name, only lists skills, or cannot be stably linked to a skill directory, no `skill:*` span is created.
 
 ## Resource Attributes

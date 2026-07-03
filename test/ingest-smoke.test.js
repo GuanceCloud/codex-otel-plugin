@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1171,6 +1171,125 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(toolOperationCount.value, 1);
   assert.equal(toolOperationCount.attributes["gen_ai.tool.name"], "exec_command");
   assert.equal(toolOperationCount.attributes["gen_ai.skill.name"], undefined);
+});
+
+test("Codex collector merges repeated skill reads within one llm step into one skill span", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "gtrace-skill-merge-"));
+  const rollout = path.join(home, "rollout-skill-merge.jsonl");
+  const workspaceSkillDir = path.join(home, "skills", "i18n_docs");
+  await mkdir(workspaceSkillDir, { recursive: true });
+  const skillFile = path.join(workspaceSkillDir, "SKILL.md");
+  await writeFile(
+    skillFile,
+    `---
+description: Translate docs
+version: 2.0.0
+---
+
+Translate markdown files.
+`,
+    "utf-8",
+  );
+
+  await writeFile(
+    rollout,
+    `${[
+      row("2026-06-03T10:00:00.000Z", "session_meta", {
+        id: "sess-skill-merge",
+        cli_version: "0.124.0",
+        model_provider: "openai",
+      }),
+      row("2026-06-03T10:00:00.100Z", "event_msg", {
+        type: "task_started",
+        turn_id: "turn-skill-merge",
+      }),
+      row("2026-06-03T10:00:00.200Z", "turn_context", {
+        model: "gpt-5.4",
+      }),
+      row("2026-06-03T10:00:00.300Z", "response_item", {
+        type: "function_call",
+        name: "exec_command",
+        call_id: "call-skill-merge-1",
+        arguments: JSON.stringify({
+          cmd: `sed -n '1,200p' ${skillFile}`,
+        }),
+      }),
+      row("2026-06-03T10:00:00.300Z", "response_item", {
+        type: "function_call",
+        name: "exec_command",
+        call_id: "call-skill-merge-2",
+        arguments: JSON.stringify({
+          cmd: `sed -n '1,200p' ${path.join(workspaceSkillDir, "references", "guide.md")}`,
+        }),
+      }),
+      row("2026-06-03T10:00:00.420Z", "response_item", {
+        type: "function_call_output",
+        call_id: "call-skill-merge-1",
+        output: "skill content",
+      }),
+      row("2026-06-03T10:00:00.420Z", "response_item", {
+        type: "function_call_output",
+        call_id: "call-skill-merge-2",
+        output: "guide content",
+      }),
+      row("2026-06-03T10:00:00.420Z", "event_msg", {
+        type: "exec_command_end",
+        call_id: "call-skill-merge-1",
+        status: "completed",
+        stdout: "skill content",
+      }),
+      row("2026-06-03T10:00:00.420Z", "event_msg", {
+        type: "exec_command_end",
+        call_id: "call-skill-merge-2",
+        status: "completed",
+        stdout: "guide content",
+      }),
+      row("2026-06-03T10:00:00.500Z", "event_msg", {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 12,
+            output_tokens: 4,
+            total_tokens: 16,
+          },
+        },
+      }),
+      row("2026-06-03T10:00:00.600Z", "event_msg", {
+        type: "task_complete",
+      }),
+    ].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    "utf-8",
+  );
+
+  const result = await collectRollout(rollout, { max_chars: 4096 });
+  const toolSpans = result.spans.filter((span) => span.name === "tool:exec_command");
+  const skillSpans = result.spans.filter((span) => span.name === "skill:i18n_docs");
+  const llmSpan = result.spans.find((span) => span.name === "llm");
+
+  assert.equal(toolSpans.length, 2);
+  assert.equal(skillSpans.length, 1);
+  assert.ok(llmSpan);
+  assert.equal(skillSpans[0].parent_id, llmSpan.span_id);
+  assert.equal(skillSpans[0].attributes["gen_ai.skill.name"], "i18n_docs");
+  assert.equal(skillSpans[0].attributes["gen_ai.skill.version"], "2.0.0");
+  assert.equal(skillSpans[0].attributes.tool_count, 2);
+  assert.equal(skillSpans[0].attributes.skill_call_id, undefined);
+
+  const metrics = buildCodexMetrics(result.spans);
+  const skillOperationCounts = metrics.filter(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.count" &&
+      metric.attributes["gen_ai.operation.name"] === "skill" &&
+      metric.attributes["gen_ai.skill.name"] === "i18n_docs",
+  );
+  const toolOperationCounts = metrics.filter(
+    (metric) =>
+      metric.name === "gen_ai.agent.operation.count" &&
+      metric.attributes["gen_ai.operation.name"] === "execute_tool" &&
+      metric.attributes["gen_ai.tool.name"] === "exec_command",
+  );
+  assert.equal(skillOperationCounts.length, 1);
+  assert.equal(toolOperationCounts.length, 2);
 });
 
 test("buildCodexMetrics emits one operation count point per operation span", () => {

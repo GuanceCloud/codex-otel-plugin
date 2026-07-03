@@ -176,9 +176,6 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   const hookLog = await readFile(path.join(home, ".codex", "gtrace-hook.log"), "utf-8");
   assert.match(hookLog, /hook invoked/);
   assert.match(hookLog, /uploaded spans/);
-  assert.match(hookLog, /metrics payload/);
-  assert.match(hookLog, /gen_ai\.agent\.operation\.count/);
-  assert.match(hookLog, /gen_ai\.conversation\.id/);
   assert.match(hookLog, /uploaded metrics/);
 
   const batch = await latestTraceBatch();

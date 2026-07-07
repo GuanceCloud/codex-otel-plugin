@@ -168,7 +168,7 @@ Token 口径：
 - `gen_ai.usage.cache_read.input_tokens`: 缓存命中的输入 token
 - `gen_ai.usage.reasoning.output_tokens`: 模型服务端返回的 reasoning token 明细
 
-`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`invoke_agent` span 上的 `gen_ai.usage.*` 表示当前 turn 汇总；`assistant` span 不携带 token usage，避免重复计算 token。
+`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`invoke_agent` 和 `assistant` span 不携带 token usage，避免重复计算 token，也避免把聚合 token tag 挂到根 span 上。
 
 `llm` span 的 duration 包含首 token 等待时间；等待值单独保留在 `ttft` 字段中。
 

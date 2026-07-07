@@ -119,12 +119,12 @@ As of 2026-06-25, `skill` still has no first-class OpenTelemetry GenAI semantic 
 
 | Field | Meaning | Typical spans |
 | --- | --- | --- |
-| `gen_ai.usage.input_tokens` | input tokens, including cache-hit input tokens | `invoke_agent`, `llm` |
-| `gen_ai.usage.output_tokens` | output tokens | `invoke_agent`, `llm` |
-| `gen_ai.usage.cache_read.input_tokens` | provider-managed cache-hit input tokens | `invoke_agent`, `llm` |
-| `gen_ai.usage.reasoning.output_tokens` | reasoning output tokens | `invoke_agent`, `llm` |
+| `gen_ai.usage.input_tokens` | input tokens, including cache-hit input tokens | `llm` |
+| `gen_ai.usage.output_tokens` | output tokens | `llm` |
+| `gen_ai.usage.cache_read.input_tokens` | provider-managed cache-hit input tokens | `llm` |
+| `gen_ai.usage.reasoning.output_tokens` | reasoning output tokens | `llm` |
 
-On `llm` spans, `gen_ai.usage.*` describes a single model call. On `invoke_agent`, it is the sum across `llm` spans in the turn. `assistant` spans never carry token usage to avoid double counting.
+`gen_ai.usage.*` is emitted only on `llm` spans and always describes a single model call. `invoke_agent` and `assistant` spans do not carry token usage to avoid double counting and oversized root-span tags.
 
 `gen_ai.usage.input_tokens` follows the OpenTelemetry meaning of full input tokens, so it differs from older `usage_input_tokens` semantics that excluded cached input tokens.
 

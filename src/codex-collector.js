@@ -83,27 +83,6 @@ function usageDetails(usage) {
   return Object.keys(details).length > 0 ? details : undefined;
 }
 
-function aggregateUsageDetails(steps) {
-  const aggregate = {};
-  let hasUsage = false;
-  for (const step of steps) {
-    const usage = usageDetails(step.usage);
-    if (!usage) continue;
-    hasUsage = true;
-
-    if (typeof usage.input === "number") aggregate.input = (aggregate.input ?? 0) + usage.input;
-    if (typeof usage.output === "number") aggregate.output = (aggregate.output ?? 0) + usage.output;
-    if (typeof usage.cache_read_input_tokens === "number") {
-      aggregate.cache_read_input_tokens =
-        (aggregate.cache_read_input_tokens ?? 0) + usage.cache_read_input_tokens;
-    }
-    if (typeof usage.reasoning_output_tokens === "number") {
-      aggregate.reasoning_output_tokens = (aggregate.reasoning_output_tokens ?? 0) + usage.reasoning_output_tokens;
-    }
-  }
-  return hasUsage ? aggregate : undefined;
-}
-
 function statusFromTurn(turn) {
   if (turn.aborted) return "cancelled";
   return turn.completed ? "completed" : "unset";
@@ -727,7 +706,6 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   const systemInstructions = buildSystemInstructions(sessionMeta, turn.invocationParams, maxChars);
 
   const rootAttributes = commonAttributes(config, sessionMeta);
-  const rootUsage = aggregateUsageDetails(turn.steps);
   setAttr(rootAttributes, "run_id", turn.turnId);
   setAttr(rootAttributes, "run_ids", turn.turnId);
   setAttr(rootAttributes, ATTR.operationName, "invoke_agent");
@@ -757,7 +735,6 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     ),
   );
   setAttr(rootAttributes, "tool_count", turn.steps.reduce((n, s) => n + s.toolCalls.length, 0));
-  setUsageAttrs(rootAttributes, rootUsage);
   setAttr(rootAttributes, "final_status", statusFromTurn(turn));
   setAttr(rootAttributes, "status", turn.aborted ? "error" : "ok");
   setAttr(rootAttributes, "reason", turn.aborted ? "Turn interrupted by user" : undefined);

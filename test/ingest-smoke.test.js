@@ -268,10 +268,10 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(agentRun.attributes, "session_create_at"), "2026-06-03T09:59:58.000Z");
   assert.equal(attrValue(agentRun.attributes, "session_updated_at"), "2026-06-03T10:00:04.400Z");
   assert.equal(attrValue(agentRun.attributes, "session_channel"), "cli");
-  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.input_tokens"), 250);
-  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.cache_read.input_tokens"), 50);
-  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.output_tokens"), 50);
-  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.reasoning.output_tokens"), 5);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.input_tokens"), undefined);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.cache_read.input_tokens"), undefined);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.output_tokens"), undefined);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.reasoning.output_tokens"), undefined);
   assert.deepEqual(attrValue(agentRun.attributes, "gen_ai.input.messages"), [
     {
       role: "user",

@@ -4,6 +4,10 @@
 
 ## 2026-07-02
 
+- 发布 `v0.1.9`
+- `invoke_agent` 移除 `gen_ai.usage.*` 聚合 tag，仅在 `llm` span 保留 token usage 字段
+- 同一 `llm` step 内多个 tool 命中同一 skill 目录时，合并为单个 `skill:<name>` span，避免重复 skill 记录
+
 - 发布 `v0.1.8`
 - 调整 `gen_ai.agent.operation.count`：恢复按 span 上报，移除 `operation_name`，并精简 count attrs
 - 当 `debug=true` 时，在 hook 日志中输出完整 metrics payload，包含完整 metric attrs/resource tags

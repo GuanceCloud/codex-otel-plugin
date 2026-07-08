@@ -4,7 +4,7 @@ This document describes the OTLP Metrics model in `codex-otel-plugin`, including
 
 Metrics are derived from the same trace spans produced for a completed Codex hook run. The plugin does not re-parse the transcript separately for metrics.
 
-Large request-side fields such as `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, and `gen_ai.tool.definitions` stay on trace span attributes only. They are not copied into metric tags to avoid high cardinality and oversized points.
+Large request-side fields such as `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.tool.definitions`, and raw tool outputs such as `gen_ai.tool.call.result` stay on trace span attributes only. They are not copied into metric tags to avoid high cardinality and oversized points.
 
 ## Upload Pipeline
 

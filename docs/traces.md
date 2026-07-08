@@ -66,7 +66,7 @@ Configured `resourceAttributes` are merged into every trace resource. They are a
 | `gen_ai.operation.name` | GenAI operation name: `invoke_agent`, `chat`, `skill`, `execute_tool` | `invoke_agent`, `llm`, `skill:*`, `tool:*` |
 | `gen_ai.output.type` | declared output type; currently `text` for normal Codex chat requests and `json` for explicit JSON output requests | `invoke_agent`, `llm`, `assistant` |
 | `gen_ai.input.messages` | structured input messages array, using the OpenTelemetry GenAI message schema | `invoke_agent`, `llm` |
-| `gen_ai.output.messages` | structured output messages array, using the OpenTelemetry GenAI message schema | `invoke_agent`, `llm` |
+| `gen_ai.output.messages` | structured output messages array, using the OpenTelemetry GenAI message schema | `invoke_agent`, `llm`, `assistant` |
 | `gen_ai.provider.name` | model provider, for example `openai` | `invoke_agent`, `llm`, `assistant`, `tool:*` |
 | `gen_ai.request.model` | requested model name | `invoke_agent`, `llm`, `assistant`, `tool:*` |
 | `gen_ai.response.model` | response model name | `invoke_agent`, `llm`, `assistant`, `tool:*` |
@@ -79,6 +79,7 @@ Current message mapping rules:
 - the first `llm.gen_ai.input.messages`: the user input
 - later `llm.gen_ai.input.messages`: previous tool results, emitted as `role=tool` with `tool_call_response` parts
 - `llm.gen_ai.output.messages`: the current model output; text replies use `text`, reasoning uses `reasoning`, and tool requests use `tool_call`
+- `assistant.gen_ai.output.messages`: the emitted assistant message itself, using the same structured message schema as other spans
 - `gen_ai.response.finish_reasons`: currently mapped to `stop`, `tool_call`, or `cancelled`
 
 ### Request Fields
@@ -135,7 +136,7 @@ As of 2026-06-25, `skill` still has no first-class OpenTelemetry GenAI semantic 
 | `gen_ai.tool.name` | tool name | `tool:*` |
 | `gen_ai.tool.call.id` | tool call ID | `tool:*` |
 | `gen_ai.tool.call.arguments` | clipped tool argument preview | `tool:*` |
-| `gen_ai.tool.call.result` | clipped tool result preview | `tool:*` |
+| `gen_ai.tool.call.result` | raw tool result content; strings keep original line breaks, objects and arrays keep their structure | `tool:*` |
 
 `tool_command` is still preserved as a project field and is extracted from `args.cmd` or `args.command`.
 

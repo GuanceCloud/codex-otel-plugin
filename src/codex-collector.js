@@ -838,6 +838,11 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       setAttr(assistantAttributes, "role", "assistant");
       setAttr(assistantAttributes, "output_preview", preview(message.text, maxChars));
       setAttr(assistantAttributes, "output_length", message.text?.length);
+      setAttr(
+        assistantAttributes,
+        ATTR.outputMessages,
+        buildOutputMessages({ text: message.text, toolCalls: [], finishReason: "stop" }, maxChars),
+      );
       setAttr(assistantAttributes, "output_kind", "text");
       setAttr(assistantAttributes, "assistant_message_start_time", isoFromMs(assistantStart));
       setAttr(assistantAttributes, "assistant_message_end_time", isoFromMs(assistantEnd));
@@ -880,7 +885,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       setAttr(toolAttributes, ATTR.toolCallId, tc.callId);
       setAttr(toolAttributes, "tool_command", preview(command, maxChars));
       setAttr(toolAttributes, ATTR.toolCallArguments, preview(tc.args, maxChars));
-      setAttr(toolAttributes, ATTR.toolCallResult, preview(toText(tc.output), maxChars));
+      setAttr(toolAttributes, ATTR.toolCallResult, tc.output);
       setSkillAttributes(
         toolAttributes,
         skill,

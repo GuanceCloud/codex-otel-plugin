@@ -352,6 +352,13 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   const assistantSpan = uploadedSpans.find((span) => span.name === "assistant");
   assert.equal(attrValue(assistantSpan.attributes, "role"), "assistant");
   assert.equal(attrValue(assistantSpan.attributes, "gen_ai.output.type"), "text");
+  assert.deepEqual(attrValue(assistantSpan.attributes, "gen_ai.output.messages"), [
+    {
+      role: "assistant",
+      parts: [{ type: "text", content: "There are two files: file1.txt and file2.txt." }],
+      finish_reason: "stop",
+    },
+  ]);
   assert.equal(
     attrValue(assistantSpan.attributes, "output_preview"),
     "There are two files: file1.txt and file2.txt.",
@@ -411,7 +418,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     attrValue(toolSpan.attributes, "gen_ai.tool.call.arguments"),
     JSON.stringify({ command: ["sed", "-n", "1,120p", systemSkillFile] }),
   );
-  assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.result"), "file1.txt file2.txt");
+  assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.result"), "file1.txt\nfile2.txt");
   assert.equal(toolSpan.parent_id, firstLlm.span_id);
   assert.equal(skillSpan.parent_id, toolSpan.span_id);
   assert.ok(spanEndNs(toolSpan) <= spanEndNs(cachedLlm));

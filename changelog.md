@@ -4,6 +4,10 @@
 
 ## 2026-07-02
 
+- 发布 `v0.1.11`
+- `assistant` span 新增 `gen_ai.output.messages`，与现有 `output_preview` 对齐
+- `gen_ai.tool.call.result` 改为直接保留原始 tool 结果，字符串保留原文和换行，对象/数组保留结构
+
 - 发布 `v0.1.9`
 - `invoke_agent` 移除 `gen_ai.usage.*` 聚合 tag，仅在 `llm` span 保留 token usage 字段
 - 同一 `llm` step 内多个 tool 命中同一 skill 目录时，合并为单个 `skill:<name>` span，避免重复 skill 记录

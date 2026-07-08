@@ -155,6 +155,8 @@ docs/traces.md
 - `llm` span 额外保留 `ttft`，单位毫秒
 - 结构化消息字段使用 `gen_ai.input.messages` 和 `gen_ai.output.messages`
 - 工具字段使用 `gen_ai.tool.*`
+- `assistant` span 也应输出 `gen_ai.output.messages`，与 `output_preview` 保持一致
+- `gen_ai.tool.call.result` 直接保留原始 tool 结果，字符串保留原文，对象/数组保留结构；不要再额外生成 `tool_result`
 - skill 字段当前同时保留兼容 `skill.*`，并补充项目扩展 `gen_ai.skill.*`；其中 `description`、`version` 仅在能从 skill 元数据稳定提取时生成，`skill.description` / `skill_call_id` 仅保留在 trace attributes 中
 - 不再使用 `model_name`、`provider_name`、`tool_name` 等旧自定义字段；`session_id` 继续作为兼容字段保留
 - 不再使用 `request_model` 和 `response_model`

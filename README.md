@@ -75,7 +75,7 @@ See [docs/install.md](docs/install.md) for installation, upgrade, uninstall, and
 
 ## Data Model
 
-See [docs/traces.md](docs/traces.md) for trace fields, span names, `gen_ai.input.messages` / `gen_ai.output.messages`, token semantics, and UI guidance.
+See [docs/traces.md](docs/traces.md) for trace fields, span names, `gen_ai.input.messages` / `gen_ai.output.messages`, tool result fields, token semantics, and UI guidance.
 
 See [docs/metrics.md](docs/metrics.md) for the metric model, tag design, and OTLP encoding choices.
 

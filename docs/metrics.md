@@ -108,7 +108,7 @@ These tags are applicable to current metrics:
 | `gen_ai.conversation.id` | span attributes | Codex session ID, aligned with trace session fields |
 | `session_id` | span attributes | Compatibility field with the same value as `gen_ai.conversation.id` |
 | `gen_ai.operation.name` | span attributes | Canonical operation name: `chat`, `skill`, or `execute_tool`; workflow metrics do not carry it by default |
-| `outcome` | span attributes | Compatibility dimension: `completed` or `error` |
+| `status` | span attributes | Operation status dimension: `completed` or `error` |
 | `provider_name` | span attributes | Compatibility alias for `gen_ai.provider.name` |
 | `gen_ai.provider.name` | span attributes | Provider name such as `openai` |
 | `request_model` | span attributes | Compatibility alias for `gen_ai.request.model` |
@@ -139,6 +139,8 @@ These tags are applicable to current metrics:
 | `gen_ai.operation.name=execute_tool` | `tool:*` span | Count tags keep only `gen_ai.tool.name`; duration tags still keep tool, model, and skill-related compatibility fields |
 | `gen_ai.operation.name=skill` | `skill:*` span | Count tags keep only `gen_ai.skill.name`; duration tags still keep the richer skill-related fields |
 | `gen_ai.skill.*` | `skill:*` / `tool:*` span | Preserved so trace and metric queries can align |
+
+For operation metrics, `status` is emitted from the span-derived operation result. The current values are `completed` and `error`.
 
 `skill.description`, `gen_ai.skill.description`, `gen_ai.skill.path`, and `skill_call_id` are intentionally excluded from default metric tags to avoid long text and high-cardinality values. They remain available on traces only.
 

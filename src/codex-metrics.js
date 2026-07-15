@@ -56,7 +56,7 @@ function statusCode(span) {
   return String(span.status?.code ?? "").toUpperCase();
 }
 
-function requestOutcome(span) {
+function requestStatus(span) {
   const finalStatus = span.attributes?.final_status;
   if (finalStatus === "completed" || finalStatus === "cancelled" || finalStatus === "unset") {
     return finalStatus;
@@ -65,7 +65,7 @@ function requestOutcome(span) {
   return "completed";
 }
 
-function operationOutcome(span) {
+function operationStatus(span) {
   if (span.attributes?.tool_result_status === "error") return "error";
   if (span.attributes?.status === "error" || statusCode(span).includes("ERROR")) return "error";
   return "completed";
@@ -86,7 +86,7 @@ function baseAttrs(span) {
   setAttr(attributes, "session_id", span.attributes?.session_id ?? span.attributes?.["gen_ai.conversation.id"]);
   setAttr(attributes, "operation_name", legacyOperationName(span));
   setAttr(attributes, "gen_ai.operation.name", span.attributes?.["gen_ai.operation.name"]);
-  setAttr(attributes, "outcome", operationOutcome(span));
+  setAttr(attributes, "status", operationStatus(span));
   setAttr(attributes, "provider_name", span.attributes?.["gen_ai.provider.name"]);
   setAttr(attributes, "gen_ai.provider.name", span.attributes?.["gen_ai.provider.name"]);
   setAttr(attributes, "request_model", span.attributes?.["gen_ai.request.model"]);
@@ -116,9 +116,9 @@ function countAttrs(span) {
     "gen_ai.conversation.id": span.attributes?.["gen_ai.conversation.id"],
     session_id: span.attributes?.session_id ?? span.attributes?.["gen_ai.conversation.id"],
     "gen_ai.operation.name": span.attributes?.["gen_ai.operation.name"],
-    outcome: operationOutcome(span),
+    status: operationStatus(span),
   };
-  if (operationOutcome(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
+  if (operationStatus(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
 
   if (span.name === "llm") {
     setAttr(attributes, "gen_ai.provider.name", span.attributes?.["gen_ai.provider.name"]);
@@ -147,7 +147,7 @@ function requestMetrics(span) {
     session_id: span.attributes?.session_id ?? span.attributes?.["gen_ai.conversation.id"],
     "error.type": span.attributes?.["error.type"],
   };
-  setAttr(attributes, "final_status", requestOutcome(span));
+  setAttr(attributes, "final_status", requestStatus(span));
 
   const duration = spanDuration(span);
   return duration === undefined ? [] : [metric(WORKFLOW_DURATION, span, duration, attributes)];
@@ -166,7 +166,7 @@ function skillMetrics(span) {
   setAttr(attributes, "skill.result_status", span.attributes?.["skill.result_status"]);
   setAttr(attributes, "gen_ai.skill.result.status", span.attributes?.["gen_ai.skill.result.status"]);
   setAttr(attributes, "gen_ai.skill.version", span.attributes?.["gen_ai.skill.version"]);
-  if (operationOutcome(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
+  if (operationStatus(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
 
   const out = [metric(OPERATION_COUNT, span, 1, countAttrs(span))];
   const durationMs = finitePositive(span.duration_ms);
@@ -178,7 +178,7 @@ function llmMetrics(span) {
   const operationAttributes = {
     ...baseAttrs(span),
   };
-  if (operationOutcome(span) === "error") setAttr(operationAttributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
+  if (operationStatus(span) === "error") setAttr(operationAttributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
   const out = [metric(OPERATION_COUNT, span, 1, countAttrs(span))];
   const durationMs = finitePositive(span.duration_ms);
   if (durationMs !== undefined) out.push(metric(OPERATION_DURATION, span, durationMs, operationAttributes));
@@ -200,7 +200,7 @@ function toolMetrics(span) {
   const attributes = {
     ...baseAttrs(span),
   };
-  if (operationOutcome(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
+  if (operationStatus(span) === "error") setAttr(attributes, "error.type", span.attributes?.["error.type"] ?? "_OTHER");
   setAttr(attributes, "tool_name", span.attributes?.["gen_ai.tool.name"] ?? String(span.name ?? "").replace(/^tool:/, ""));
   setAttr(attributes, "gen_ai.tool.name", span.attributes?.["gen_ai.tool.name"] ?? String(span.name ?? "").replace(/^tool:/, ""));
   setAttr(attributes, "skill_name", span.attributes?.["skill.name"] ?? span.attributes?.["gen_ai.skill.name"]);

@@ -4,6 +4,10 @@
 
 ## 2026-07-02
 
+- 发布 `v0.1.12`
+- `gen_ai.agent.operation.count` 与 `gen_ai.agent.operation.duration` 的指标 tag 统一从 `outcome` 切换到 `status`
+- 同步更新 metrics 文档、README、AGENTS 与测试断言，移除 operation metrics 对 `outcome` 的使用
+
 - 发布 `v0.1.11`
 - `assistant` span 新增 `gen_ai.output.messages`，与现有 `output_preview` 对齐
 - `gen_ai.tool.call.result` 改为直接保留原始 tool 结果，字符串保留原文和换行，对象/数组保留结构

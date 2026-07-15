@@ -501,7 +501,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(skillOperation.unit, "ms");
   assert.equal(skillOperation.attributes.agent_runtime, "codex");
   assert.equal(skillOperation.attributes.operation_name, "skill");
-  assert.equal(skillOperation.attributes.outcome, "completed");
+  assert.equal(skillOperation.attributes.status, "completed");
   assert.equal(skillOperation.attributes.skill_name, "plugin-creator");
   assert.equal(skillOperation.attributes.skill_source, "system");
   assert.equal(skillOperation.attributes["gen_ai.skill.name"], "plugin-creator");
@@ -525,7 +525,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   );
   assert.equal(toolOperation.unit, "ms");
   assert.equal(toolOperation.attributes.operation_name, "tool");
-  assert.equal(toolOperation.attributes.outcome, "completed");
+  assert.equal(toolOperation.attributes.status, "completed");
   assert.equal(toolOperation.attributes.tool_name, "exec_command");
   assert.equal(toolOperation.attributes["gen_ai.tool.name"], "exec_command");
   assert.equal(toolOperation.attributes.skill_name, "plugin-creator");
@@ -1153,7 +1153,7 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(skillOperation.attributes.operation_name, "skill");
   assert.equal(skillOperation.attributes.skill_name, "dashboard");
   assert.equal(skillOperation.attributes.skill_source, "user");
-  assert.equal(skillOperation.attributes.outcome, "completed");
+  assert.equal(skillOperation.attributes.status, "completed");
   assert.equal(skillOperation.attributes["gen_ai.skill.name"], "dashboard");
   assert.equal(skillOperation.attributes["gen_ai.skill.source.type"], "user");
   assert.equal(skillOperation.attributes["gen_ai.skill.result.status"], "completed");
@@ -1168,7 +1168,7 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(toolOperation.attributes.tool_name, "exec_command");
   assert.equal(toolOperation.attributes.skill_name, "dashboard");
   assert.equal(toolOperation.attributes.skill_source, "user");
-  assert.equal(toolOperation.attributes.outcome, "completed");
+  assert.equal(toolOperation.attributes.status, "completed");
   assert.equal(toolOperation.attributes["gen_ai.skill.name"], "dashboard");
   assert.equal(toolOperation.attributes["gen_ai.skill.source.type"], "user");
   assert.equal(toolOperation.attributes["gen_ai.skill.result.status"], "completed");

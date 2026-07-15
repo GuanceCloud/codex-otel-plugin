@@ -158,7 +158,7 @@ These fields do not have a direct GenAI standard equivalent or are intentionally
 | `tool_command` | target command for the tool | `tool:*` |
 | `tool_result_status` | tool result status, `completed` or `error` | `tool:*` |
 | `final_status` | terminal turn status | `invoke_agent` |
-| `status` | business status, usually `ok` or `error` | all |
+| `status` | business status, usually `ok` or `error`; operation metrics derive their `status` tag from this field and related terminal state fields | all |
 | `reason` | error or cancellation reason | `invoke_agent`, `tool:*` |
 | `error.type` | OpenTelemetry error type, currently `_OTHER` for error cases | `invoke_agent`, `tool:*` |
 

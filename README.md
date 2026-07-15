@@ -88,7 +88,7 @@ Current metrics derived from each turn's spans:
 - `gen_ai.agent.operation.duration`
 - `gen_ai.client.token.usage`
 
-`gen_ai.agent.operation.count` is emitted once per operation span (`model`, `tool`, `skill`) with trimmed count-specific attributes. `gen_ai.agent.operation.duration` remains span-based and keeps the richer operation context.
+`gen_ai.agent.operation.count` is emitted once per operation span (`model`, `tool`, `skill`) with trimmed count-specific attributes. `gen_ai.agent.operation.duration` remains span-based and keeps the richer operation context. Operation metrics use the `status` tag rather than the older `outcome` tag.
 
 Metrics include `gen_ai.conversation.id` and the compatibility field `session_id`, but they do not include `session_key` or `run_id`. Global filter tags should be placed in OTLP `resource.attributes` through `resourceAttributes` so traces and metrics can share them. Field migration notes are documented in [docs/traces.md](docs/traces.md) and [docs/metrics.md](docs/metrics.md).
 

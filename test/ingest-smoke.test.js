@@ -268,10 +268,10 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(agentRun.attributes, "session_create_at"), "2026-06-03T09:59:58.000Z");
   assert.equal(attrValue(agentRun.attributes, "session_updated_at"), "2026-06-03T10:00:04.400Z");
   assert.equal(attrValue(agentRun.attributes, "session_channel"), "cli");
-  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.input_tokens"), undefined);
-  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.cache_read.input_tokens"), undefined);
-  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.output_tokens"), undefined);
-  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.reasoning.output_tokens"), undefined);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.input_tokens"), 250);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.cache_read.input_tokens"), 50);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.output_tokens"), 50);
+  assert.equal(attrValue(agentRun.attributes, "gen_ai.usage.reasoning.output_tokens"), 5);
   assert.deepEqual(attrValue(agentRun.attributes, "gen_ai.input.messages"), [
     {
       role: "user",
@@ -295,10 +295,11 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   const secondLlm = llmSpans.find((span) => attrValue(span.attributes, "step_index") === 1);
   assert.ok(firstLlm);
   assert.ok(secondLlm);
+  assert.ok(llmSpans.every((span) => parentSpanIdHex(span) === spanIdHex(agentRun)));
   assert.equal(attrValue(firstLlm.attributes, "ttft"), 1000);
   assert.equal(attrValue(secondLlm.attributes, "ttft"), 900);
-  assert.equal(Number(spanEndNs(firstLlm) - spanStartNs(firstLlm)) / 1_000_000, 2100);
-  assert.equal(Number(spanEndNs(secondLlm) - spanStartNs(secondLlm)) / 1_000_000, 1200);
+  assert.equal(Number(spanEndNs(firstLlm) - spanStartNs(firstLlm)) / 1_000_000, 1600);
+  assert.equal(Number(spanEndNs(secondLlm) - spanStartNs(secondLlm)) / 1_000_000, 1100);
   assert.deepEqual(attrValue(firstLlm.attributes, "gen_ai.response.finish_reasons"), ["tool_call"]);
   assert.deepEqual(attrValue(firstLlm.attributes, "gen_ai.input.messages"), [
     {
@@ -371,6 +372,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     attrValue(assistantSpan.attributes, "assistant_message_event_time"),
     "2026-06-03T10:00:04.300Z",
   );
+  assert.equal(parentSpanIdHex(assistantSpan), spanIdHex(agentRun));
 
   const listed = await fetch(`${baseUrl}/traces?limit=6`).then((res) => res.json());
   assert.deepEqual(
@@ -397,8 +399,6 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     "Create and scaffold plugin directories for Codex.",
   );
   assert.equal(attrValue(skillSpan.attributes, "gen_ai.skill.version"), "2.1.0");
-  assert.ok(spanStartNs(skillSpan) >= spanStartNs(firstLlm));
-  assert.ok(spanEndNs(skillSpan) <= spanEndNs(firstLlm));
   const toolSpan = uploadedSpans.find((span) => span.name === "tool:exec_command");
   assert.equal(
     attrValue(toolSpan.attributes, "tool_command"),
@@ -407,6 +407,7 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.operation.name"), "execute_tool");
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.name"), "exec_command");
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.id"), "call-1");
+  assert.equal(attrValue(toolSpan.attributes, "triggered_by.llm_span_id"), spanIdHex(firstLlm));
   assert.equal(attrValue(toolSpan.attributes, "skill_call_id"), "call-1");
   assert.equal(attrValue(toolSpan.attributes, "skill.description"), "Create and scaffold plugin directories for Codex.");
   assert.equal(attrValue(toolSpan.attributes, "skill.name"), "plugin-creator");
@@ -419,9 +420,12 @@ test("native gtrace Codex hook parses rollout and uploads spans as OTLP protobuf
     JSON.stringify({ command: ["sed", "-n", "1,120p", systemSkillFile] }),
   );
   assert.equal(attrValue(toolSpan.attributes, "gen_ai.tool.call.result"), "file1.txt\nfile2.txt");
-  assert.equal(toolSpan.parent_id, firstLlm.span_id);
-  assert.equal(skillSpan.parent_id, toolSpan.span_id);
-  assert.ok(spanEndNs(toolSpan) <= spanEndNs(cachedLlm));
+  assert.equal(parentSpanIdHex(toolSpan), spanIdHex(agentRun));
+  assert.equal(parentSpanIdHex(skillSpan), spanIdHex(toolSpan));
+  assert.equal(spanStartNs(skillSpan), spanStartNs(toolSpan));
+  assert.equal(spanEndNs(skillSpan), spanEndNs(toolSpan));
+  assert.ok(spanEndNs(firstLlm) < spanEndNs(toolSpan));
+  assert.ok(spanEndNs(toolSpan) <= spanStartNs(cachedLlm));
   assert.equal(listed.data.at(-1).gtrace.trace.session_id, "sess-basic");
   assert.equal(
     listed.data.find((span) => span.gtrace.observation.type === "llm").gtrace.observation.model_name,
@@ -990,7 +994,7 @@ test("Codex parser deduplicates repeated tool calls with the same call_id", () =
   assert.equal(turns[0].steps[0].toolCalls[0].endTime, Date.parse("2026-06-03T10:00:02.300Z"));
 });
 
-test("Codex collector nests skill span under tool span while keeping assistant spans", async () => {
+test("Codex collector keeps llm assistant and tool spans under invoke_agent", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "gtrace-skill-order-"));
   const sessionDir = path.join(home, "sessions");
   await mkdirp(path.join(home, ".codex"));
@@ -1054,7 +1058,7 @@ test("Codex collector nests skill span under tool span while keeping assistant s
         type: "exec_command_end",
         call_id: "call-skill-order",
         status: "completed",
-        stdout: "dashboard skill",
+        stdout: "x".repeat(5000),
       }),
       row("2026-06-03T10:00:03.000Z", "response_item", {
         type: "message",
@@ -1098,10 +1102,17 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   const firstLlm = result.spans.find(
     (span) => span.name === "llm" && span.attributes.step_index === 0,
   );
+  const rootSpan = result.spans.find((span) => span.name === "invoke_agent");
   assert.ok(skillSpan);
   assert.ok(toolSpan);
   assert.ok(firstLlm);
-  assert.equal(toolSpan.parent_id, firstLlm.span_id);
+  assert.ok(rootSpan);
+  assert.ok(assistantSpans.every((span) => span.parent_id === rootSpan.span_id));
+  assert.equal(rootSpan.attributes["gen_ai.usage.input_tokens"], 50);
+  assert.equal(rootSpan.attributes["gen_ai.usage.output_tokens"], 16);
+  assert.equal(firstLlm.parent_id, rootSpan.span_id);
+  assert.equal(toolSpan.parent_id, rootSpan.span_id);
+  assert.equal(toolSpan.attributes["triggered_by.llm_span_id"], firstLlm.span_id);
   assert.equal(skillSpan.parent_id, toolSpan.span_id);
   assert.equal(skillSpan.attributes["gen_ai.skill.name"], "dashboard");
   assert.equal(skillSpan.attributes["gen_ai.skill.description"], "生成观测云 Dashboard 仪表板。");
@@ -1115,6 +1126,7 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(toolSpan.attributes["gen_ai.skill.version"], "1.4.0");
   assert.equal(toolSpan.attributes.skill_call_id, "call-skill-order");
   assert.equal(toolSpan.attributes["skill.description"], "生成观测云 Dashboard 仪表板。");
+  assert.match(toolSpan.attributes["gen_ai.tool.call.result"], /\[truncated 904 chars\]$/);
 
   const metrics = buildCodexMetrics(result.spans);
   const skillWorkflow = metrics.find(
@@ -1180,7 +1192,7 @@ test("Codex collector nests skill span under tool span while keeping assistant s
   assert.equal(toolOperationCount.attributes["gen_ai.skill.name"], undefined);
 });
 
-test("Codex collector merges repeated skill reads within one llm step into one skill span", async () => {
+test("Codex collector keeps one skill child for each matching tool call", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "gtrace-skill-merge-"));
   const rollout = path.join(home, "rollout-skill-merge.jsonl");
   const workspaceSkillDir = path.join(home, "skills", "i18n_docs");
@@ -1271,16 +1283,20 @@ Translate markdown files.
   const result = await collectRollout(rollout, { max_chars: 4096 });
   const toolSpans = result.spans.filter((span) => span.name === "tool:exec_command");
   const skillSpans = result.spans.filter((span) => span.name === "skill:i18n_docs");
-  const llmSpan = result.spans.find((span) => span.name === "llm");
+  const rootSpan = result.spans.find((span) => span.name === "invoke_agent");
 
   assert.equal(toolSpans.length, 2);
-  assert.equal(skillSpans.length, 1);
-  assert.ok(llmSpan);
-  assert.equal(skillSpans[0].parent_id, llmSpan.span_id);
-  assert.equal(skillSpans[0].attributes["gen_ai.skill.name"], "i18n_docs");
-  assert.equal(skillSpans[0].attributes["gen_ai.skill.version"], "2.0.0");
-  assert.equal(skillSpans[0].attributes.tool_count, 2);
-  assert.equal(skillSpans[0].attributes.skill_call_id, undefined);
+  assert.equal(skillSpans.length, 2);
+  assert.ok(rootSpan);
+  assert.ok(toolSpans.every((span) => span.parent_id === rootSpan.span_id));
+  for (const skillSpan of skillSpans) {
+    const parentTool = toolSpans.find((span) => span.span_id === skillSpan.parent_id);
+    assert.ok(parentTool);
+    assert.equal(skillSpan.attributes["gen_ai.skill.name"], "i18n_docs");
+    assert.equal(skillSpan.attributes["gen_ai.skill.version"], "2.0.0");
+    assert.equal(skillSpan.attributes.tool_count, 1);
+    assert.equal(skillSpan.attributes.skill_call_id, parentTool.attributes["gen_ai.tool.call.id"]);
+  }
 
   const metrics = buildCodexMetrics(result.spans);
   const skillOperationCounts = metrics.filter(
@@ -1295,7 +1311,7 @@ Translate markdown files.
       metric.attributes["gen_ai.operation.name"] === "execute_tool" &&
       metric.attributes["gen_ai.tool.name"] === "exec_command",
   );
-  assert.equal(skillOperationCounts.length, 1);
+  assert.equal(skillOperationCounts.length, 2);
   assert.equal(toolOperationCounts.length, 2);
 });
 
@@ -1512,6 +1528,21 @@ function spanEndNs(span) {
   return BigInt(span.endTimeUnixNano ?? span.end_time_unix_nano ?? 0);
 }
 
+function bytesHex(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return Buffer.from(value).toString("hex");
+  if (Array.isArray(value?.data)) return Buffer.from(value.data).toString("hex");
+  return "";
+}
+
+function spanIdHex(span) {
+  return span.span_id ?? bytesHex(span.spanId);
+}
+
+function parentSpanIdHex(span) {
+  return span.parent_id ?? bytesHex(span.parentSpanId);
+}
+
 function collectOtlpAttributeKeys(request) {
   const keys = [];
   for (const resourceSpan of request.resourceSpans ?? []) {
@@ -1695,6 +1726,13 @@ function buildCodexRolloutFixture(options = {}) {
     row("2026-06-03T10:00:02.600Z", "event_msg", {
       type: "token_count",
       info: {
+        total_token_usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          total_tokens: 120,
+          cached_input_tokens: 0,
+          reasoning_output_tokens: 5,
+        },
         last_token_usage: {
           input_tokens: 100,
           output_tokens: 20,
@@ -1723,6 +1761,13 @@ function buildCodexRolloutFixture(options = {}) {
     row("2026-06-03T10:00:04.200Z", "event_msg", {
       type: "token_count",
       info: {
+        total_token_usage: {
+          input_tokens: 250,
+          output_tokens: 50,
+          total_tokens: 300,
+          cached_input_tokens: 50,
+          reasoning_output_tokens: 5,
+        },
         last_token_usage: {
           input_tokens: 150,
           output_tokens: 30,

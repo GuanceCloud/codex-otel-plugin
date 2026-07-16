@@ -141,10 +141,10 @@ docs/traces.md
 
 - 根 span name 是 `invoke_agent`
 - 模型调用 span name 是 `llm`
-- 助手消息 span name 是 `assistant`，parent 是对应的 `llm` span
-- skill span name 是 `skill:<name>`，当前只在高置信度识别到 skill 目录资源访问时生成；单个 tool 归属 skill 时 parent 是对应的 `tool:<name>`；若同一个 `llm` step 内多个 tool 都命中同一 skill 目录，则合并为一个 skill span 并直接挂到该 `llm`
+- 助手消息 span name 是 `assistant`，parent 是 `invoke_agent` span
+- skill span name 是 `skill:<name>`，当前只在高置信度识别到 skill 目录资源访问时生成，parent 必须是对应的 `tool:<name>`；不同 tool 命中同一 skill 时各自保留独立的 `tool -> skill` 分支，禁止生成 `llm -> skill`
 - 工具调用 span name 是 `tool:<name>`
-- 若工具调用已归属到某个 skill，则 `tool:<name>` 仍直接挂到 `llm`；skill span 默认挂到对应 tool，下同一步多 tool 命中同一 skill 时聚合为一个 skill span 并挂到 `llm`
+- `llm`、`assistant` 和 `tool:<name>` 都直接挂到 `invoke_agent`；工具与触发模型调用的关联使用 `triggered_by.llm_span_id`
 - 工具命令字段使用 `tool_command`，从 `args.cmd` 或 `args.command` 提取
 - 字段优先使用 OpenTelemetry GenAI semantic conventions
 - `invoke_agent` 额外包含 `session_create_at`、`session_updated_at`、`session_channel`
@@ -158,7 +158,7 @@ docs/traces.md
 - 结构化消息字段使用 `gen_ai.input.messages` 和 `gen_ai.output.messages`
 - 工具字段使用 `gen_ai.tool.*`
 - `assistant` span 也应输出 `gen_ai.output.messages`，与 `output_preview` 保持一致
-- `gen_ai.tool.call.result` 直接保留原始 tool 结果，字符串保留原文，对象/数组保留结构；不要再额外生成 `tool_result`
+- `gen_ai.tool.call.result` 保留裁剪后的 tool 结果，字符串保留换行，对象/数组保留结构；不要再额外生成 `tool_result`
 - skill 字段当前同时保留兼容 `skill.*`，并补充项目扩展 `gen_ai.skill.*`；其中 `description`、`version` 仅在能从 skill 元数据稳定提取时生成，`skill.description` / `skill_call_id` 仅保留在 trace attributes 中
 - 不再使用 `model_name`、`provider_name`、`tool_name` 等旧自定义字段；`session_id` 继续作为兼容字段保留
 - 不再使用 `request_model` 和 `response_model`
@@ -172,9 +172,9 @@ Token 口径：
 - `gen_ai.usage.cache_read.input_tokens`: 缓存命中的输入 token
 - `gen_ai.usage.reasoning.output_tokens`: 模型服务端返回的 reasoning token 明细
 
-`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`invoke_agent` 和 `assistant` span 不携带 token usage，避免重复计算 token，也避免把聚合 token tag 挂到根 span 上。
+`llm` span 上的 `gen_ai.usage.*` 表示单次模型调用；`invoke_agent` 携带当前 turn 汇总 token，优先使用 `total_token_usage`，缺失时对各次模型调用求和；`assistant` 不携带 token usage。
 
-`llm` span 的 duration 包含首 token 等待时间；等待值单独保留在 `ttft` 字段中。
+`llm` span 的 duration 包含首 token 等待时间，但必须在对应模型调用的 `token_count` 边界结束；后续 assistant 事件或 tool 完成不得拉长 `llm`。等待值单独保留在 `ttft` 字段中。
 
 ## 状态逻辑
 
@@ -193,7 +193,8 @@ Token 口径：
 修改该逻辑时必须保留或更新测试：
 
 ```text
-Codex collector nests skill span under tool span while keeping assistant spans
+Codex collector keeps llm assistant and tool spans under invoke_agent
+Codex collector keeps one skill child for each matching tool call
 sequential Codex hooks skip incomplete turns and upload once after completion
 Codex collector does not reupload completed turns after sidecar fingerprint drift
 Codex parser infers completed status when Stop hook runs before task_complete is written

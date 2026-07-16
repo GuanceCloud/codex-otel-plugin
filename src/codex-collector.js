@@ -45,6 +45,7 @@ const ATTR = {
   toolCallId: "gen_ai.tool.call.id",
   toolCallResult: "gen_ai.tool.call.result",
   toolName: "gen_ai.tool.name",
+  triggeredByLlmSpanId: "triggered_by.llm_span_id",
   usageCacheReadInputTokens: "gen_ai.usage.cache_read.input_tokens",
   usageInputTokens: "gen_ai.usage.input_tokens",
   usageOutputTokens: "gen_ai.usage.output_tokens",
@@ -81,6 +82,21 @@ function usageDetails(usage) {
   if (typeof cacheRead === "number") details.cache_read_input_tokens = cacheRead;
   if (typeof usage.reasoning_output_tokens === "number") details.reasoning_output_tokens = usage.reasoning_output_tokens;
   return Object.keys(details).length > 0 ? details : undefined;
+}
+
+function turnUsageDetails(turn) {
+  const total = usageDetails(turn?.totalUsage);
+  if (total) return total;
+
+  const aggregate = {};
+  for (const step of turn?.steps ?? []) {
+    const usage = usageDetails(step.usage);
+    if (!usage) continue;
+    for (const key of ["input", "output", "cache_read_input_tokens", "reasoning_output_tokens"]) {
+      if (typeof usage[key] === "number") aggregate[key] = (aggregate[key] ?? 0) + usage[key];
+    }
+  }
+  return Object.keys(aggregate).length > 0 ? aggregate : undefined;
 }
 
 function statusFromTurn(turn) {
@@ -598,20 +614,6 @@ function buildSkillContexts(toolCalls = []) {
   };
 }
 
-function mergeSkillOutputPreview(toolCalls, maxChars) {
-  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
-  if (toolCalls.length === 1) return preview(toText(toolCalls[0]?.output), maxChars);
-
-  const outputs = toolCalls
-    .map((tc) => ({
-      name: tc?.name,
-      output: tc?.output != null ? clipValue(toText(tc.output), maxChars) : undefined,
-      ...(tc?.error ? { error: clipValue(tc.error, maxChars) } : {}),
-    }))
-    .filter((entry) => entry.output !== undefined || entry.error !== undefined);
-  return outputs.length > 0 ? preview(outputs, maxChars) : undefined;
-}
-
 async function populateTurnSkillMetadata(turn, cache) {
   if (!cache) return;
   for (const step of turn.steps ?? []) {
@@ -735,6 +737,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
     ),
   );
   setAttr(rootAttributes, "tool_count", turn.steps.reduce((n, s) => n + s.toolCalls.length, 0));
+  setUsageAttrs(rootAttributes, turnUsageDetails(turn));
   setAttr(rootAttributes, "final_status", statusFromTurn(turn));
   setAttr(rootAttributes, "status", turn.aborted ? "error" : "ok");
   setAttr(rootAttributes, "reason", turn.aborted ? "Turn interrupted by user" : undefined);
@@ -761,14 +764,12 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
   turn.steps.forEach((step, index) => {
     const generationSpanId = randomSpanId();
     const { toolCallToSkill } = buildSkillContexts(step.toolCalls);
-    const skillGroups = new Map();
     const usage = usageDetails(step.usage);
     const llmRequestStart = llmRequestStartTime(turn, turn.steps, index);
     const ttft =
       Number.isFinite(llmRequestStart) && Number.isFinite(step.startTime) && step.startTime >= llmRequestStart
         ? step.startTime - llmRequestStart
         : 0;
-    const llmEndTime = latestStepChildEndTime(step);
     const generationInput = index === 0 ? clipValue(turn.userInput, maxChars) : previousToolResults;
     const generationOutput = buildGenerationOutput(step, maxChars);
     const attributes = commonAttributes(config, sessionMeta);
@@ -815,7 +816,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
         parentId: rootSpanId,
         name: "llm",
         start: ttft > 0 ? llmRequestStart : step.startTime,
-        end: llmEndTime,
+        end: step.modelEndTime ?? step.endTime,
         attributes,
         resource,
         scope,
@@ -858,7 +859,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       spans.push(
         makeSpan({
           traceId,
-          parentId: generationSpanId,
+          parentId: rootSpanId,
           name: "assistant",
           start: assistantStart,
           end: assistantEnd,
@@ -883,9 +884,10 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       setModelAttrs(toolAttributes, turn.model);
       setAttr(toolAttributes, ATTR.toolName, tc.name || "tool");
       setAttr(toolAttributes, ATTR.toolCallId, tc.callId);
+      setAttr(toolAttributes, ATTR.triggeredByLlmSpanId, generationSpanId);
       setAttr(toolAttributes, "tool_command", preview(command, maxChars));
       setAttr(toolAttributes, ATTR.toolCallArguments, preview(tc.args, maxChars));
-      setAttr(toolAttributes, ATTR.toolCallResult, tc.output);
+      setAttr(toolAttributes, ATTR.toolCallResult, clipValue(tc.output, maxChars));
       setSkillAttributes(
         toolAttributes,
         skill,
@@ -902,7 +904,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
         makeSpan({
           traceId,
           spanId: toolSpanId,
-          parentId: generationSpanId,
+          parentId: rootSpanId,
           name: `tool:${tc.name || "tool"}`,
           start: tc.startTime,
           end: tc.endTime ?? step.endTime,
@@ -915,27 +917,7 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       );
 
       if (!skill) continue;
-      const skillKey = skill.rootPath ?? skill.skillFile ?? skill.skillName;
-      if (!skillGroups.has(skillKey)) {
-        skillGroups.set(skillKey, {
-          skill,
-          metadata: skillMetadata,
-          toolSpans: [],
-          toolCalls: [],
-        });
-      }
-      const group = skillGroups.get(skillKey);
-      group.toolSpans.push({ spanId: toolSpanId, toolCall: tc });
-      group.toolCalls.push(tc);
-      if (!group.metadata && skillMetadata) group.metadata = skillMetadata;
-    }
-
-    for (const group of skillGroups.values()) {
-      const { skill, metadata, toolSpans, toolCalls } = group;
-      const hasError = toolCalls.some((tc) => tc.error);
-      const firstStart = Math.min(...toolCalls.map((tc) => tc.startTime));
-      const lastEnd = Math.max(...toolCalls.map((tc) => tc.endTime ?? step.endTime));
-      const singleTool = toolSpans.length === 1 ? toolSpans[0] : undefined;
+      const hasError = Boolean(tc.error);
       const skillAttributes = commonAttributes(config, sessionMeta);
       setAttr(skillAttributes, "run_id", turn.turnId);
       setAttr(skillAttributes, "run_ids", turn.turnId);
@@ -945,36 +927,32 @@ function buildTurnSpans(turn, sessionMeta, config, ctx) {
       setSkillAttributes(
         skillAttributes,
         skill,
-        metadata,
+        skillMetadata,
         hasError ? "error" : "completed",
-        singleTool?.toolCall?.callId,
+        tc.callId,
         maxChars,
       );
-      setAttr(skillAttributes, "tool_count", toolSpans.length);
+      setAttr(skillAttributes, "tool_count", 1);
       setAttr(skillAttributes, "input_preview", preview(skill.skillFile, maxChars));
-      setAttr(skillAttributes, "output_preview", mergeSkillOutputPreview(toolCalls, maxChars));
+      setAttr(skillAttributes, "output_preview", preview(toText(tc.output), maxChars));
       setAttr(skillAttributes, "status", hasError ? "error" : "ok");
-      setAttr(
-        skillAttributes,
-        "reason",
-        hasError ? clipValue(toolCalls.map((tc) => tc.error).filter(Boolean).join("\n"), maxChars) : undefined,
-      );
+      setAttr(skillAttributes, "reason", hasError ? clipValue(tc.error, maxChars) : undefined);
       setAttr(skillAttributes, "error.type", hasError ? "_OTHER" : undefined);
 
       spans.push(
         makeSpan({
           traceId,
-          parentId: singleTool ? singleTool.spanId : generationSpanId,
+          parentId: toolSpanId,
           name: `skill:${skill.skillName}`,
-          start: firstStart,
-          end: lastEnd,
+          start: tc.startTime,
+          end: tc.endTime ?? step.endTime,
           attributes: skillAttributes,
           resource,
           scope,
           ingest,
           status: {
             code: hasError ? "STATUS_CODE_ERROR" : "STATUS_CODE_UNSET",
-            message: hasError ? toolCalls.map((tc) => tc.error).filter(Boolean).join("\n") : undefined,
+            message: tc.error,
           },
         }),
       );
@@ -1020,6 +998,7 @@ function turnFingerprint(turn) {
       steps: turn.steps.map((step) => ({
         startTime: step.startTime,
         endTime: step.endTime,
+        modelEndTime: step.modelEndTime,
         text: step.text,
         reasoning: step.reasoning,
         usage: step.usage,

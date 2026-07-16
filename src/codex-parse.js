@@ -127,7 +127,10 @@ export function parseSession(lines) {
     if (!step) return;
     step.endTime = Math.max(step.endTime, ts);
     finalizeAssistantMessageTimes(step, step.endTime);
-    if (usage) step.usage = usage;
+    if (usage) {
+      step.usage = usage;
+      step.modelEndTime = ts;
+    }
     turn.steps.push(step);
     step = null;
   }

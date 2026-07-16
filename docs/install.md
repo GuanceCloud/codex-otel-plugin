@@ -61,18 +61,30 @@ Download and execute the PowerShell release installer:
 ```powershell
 $installer = Join-Path $env:TEMP "codex-otel-install.ps1"
 Invoke-WebRequest https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.ps1 -OutFile $installer
-powershell -ExecutionPolicy Bypass -File $installer `
+& $installer `
   -Version latest `
   -Endpoint https://llm-openway.guance.com `
   -XToken "<token>"
 ```
 
-When using PowerShell 7, replace `powershell` with `pwsh`. The remote installer downloads `codex-otel-plugin.zip`, expands it into a temporary directory, and invokes `scripts/install.ps1`. It creates the marketplace, plugin cache, hook JSON, `config.toml`, and `gtrace.json` under `%USERPROFILE%\.codex` by default. The generated hook command uses `powershell.exe` as a stable Windows launcher and safely quotes Node.js and plugin paths containing spaces.
+To add tags on Windows, pass them as a PowerShell array:
+
+```powershell
+& $installer `
+  -Version latest `
+  -Endpoint https://llm-openway.guance.com `
+  -XToken "<token>" `
+  -Tag @("agent_id=agent_5659c3006dfe11f1bf1187f5c0f911c6","agent_name=zp")
+```
+
+If you must launch a new PowerShell process, use `-Command` and invoke the script inside that command block instead of `-File`, because `-File` can split array arguments such as `-Tag`.
+
+When using PowerShell 7, replace `powershell` with `pwsh` only for the outer shell process when needed. The remote installer downloads `codex-otel-plugin.zip`, expands it into a temporary directory, and invokes `scripts/install.ps1`. It creates the marketplace, plugin cache, hook JSON, `config.toml`, and `gtrace.json` under `%USERPROFILE%\.codex` by default. The generated hook command uses `powershell.exe` as a stable Windows launcher and safely quotes Node.js and plugin paths containing spaces.
 
 For a development install from a local checkout:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 `
+& .\scripts\install.ps1 `
   -Refresh `
   -Endpoint https://llm-openway.guance.com `
   -XToken "<token>"
@@ -114,7 +126,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
 Windows PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -NoConfig
+& .\scripts\install.ps1 -NoConfig
 ```
 
 ## Minimum Validation

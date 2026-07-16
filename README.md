@@ -61,7 +61,13 @@ On Windows PowerShell:
 ```powershell
 $installer = Join-Path $env:TEMP "codex-otel-install.ps1"
 Invoke-WebRequest https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.ps1 -OutFile $installer
-powershell -ExecutionPolicy Bypass -File $installer -Version latest -Endpoint https://llm-openway.guance.com -XToken "<token>"
+& $installer -Version latest -Endpoint https://llm-openway.guance.com -XToken "<token>"
+```
+
+To add tags on Windows, pass them as a PowerShell array:
+
+```powershell
+& $installer -Version latest -Endpoint https://llm-openway.guance.com -XToken "<token>" -Tag @("agent_id=agent_5659c3006dfe11f1bf1187f5c0f911c6","agent_name=zp")
 ```
 
 Restart Codex after installation so the Stop hook is reloaded.

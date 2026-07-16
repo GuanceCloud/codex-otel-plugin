@@ -2,7 +2,7 @@
 
 This document describes the OTLP Trace model emitted by `codex-otel-plugin`: span structure, field naming, token semantics, and UI guidance. See [metrics.md](metrics.md) for metric semantics.
 
-Trace attributes are emitted using OpenTelemetry GenAI semantic conventions where possible. The current span names are `invoke_agent`, `llm`, `assistant`, `skill:<name>`, and `tool:<name>`.
+Trace attributes are emitted using OpenTelemetry GenAI semantic conventions where possible and follow the [GTrace AI Trace Semantic Conventions](https://github.com/GuanceCloud/guance-gtrace-ai-semantic-conventions/blob/main/docs/en/trace-semantic-conventions.md). The current span names are `invoke_agent`, `llm`, `assistant`, `skill:<name>`, and `tool:<name>`.
 
 ## Trace Structure
 
@@ -11,29 +11,28 @@ One Codex turn produces a trace tree like this:
 ```text
 invoke_agent
 ├── llm
-│   ├── tool:exec_command
-│   │   └── skill:plugin-creator
-│   └── assistant
-└── llm
-    └── assistant
+├── tool:exec_command
+│   └── skill:plugin-creator
+├── llm
+└── assistant
 ```
 
 Span relationships:
 
 - `invoke_agent` is the root span for a Codex turn and maps to `gen_ai.operation.name=invoke_agent`.
 - `llm` is a single model call. Its parent is `invoke_agent`, and it maps to `gen_ai.operation.name=chat`.
-- `assistant` is a single assistant message output. Its parent is the matching `llm` span, and it does not carry token usage.
-- `tool:<name>` is a single tool call. Its parent is the `llm` span that triggered it, and it maps to `gen_ai.operation.name=execute_tool`.
-- `skill:<name>` is a span that represents skill resource usage. When a tool call is confidently identified as reading `SKILL.md` or related files under the same skill directory, the corresponding `skill:*` span is created. A single matching tool keeps the `skill:*` span under that `tool:*` span. If multiple tool calls in the same `llm` step hit the same skill directory, they are merged into one `skill:*` span under the `llm` span to avoid duplicate skill records. It uses `gen_ai.operation.name=skill`.
+- `assistant` is a single assistant message output. Its parent is `invoke_agent`, and it does not carry token usage.
+- `tool:<name>` is a single tool call. Its parent is `invoke_agent`, and it maps to `gen_ai.operation.name=execute_tool`. `triggered_by.llm_span_id` preserves the triggering model-call relationship.
+- `skill:<name>` represents one confirmed Skill resource use. Its parent is always the corresponding `tool:<name>` span and it maps to `gen_ai.operation.name=skill`. Different tools that access the same Skill keep separate `skill:*` children.
 - If a tool call cannot be confidently attributed to a skill, only the `tool:*` span is kept.
-- The `llm` span end time is extended to cover assistant / tool child nodes so the parent span does not appear as `0ns` while children still have duration.
+- The `llm` span covers only the real model request. It is never extended to cover a later assistant event or tool completion.
 
 ## Skill Detection Rules
 
 Codex transcripts do not currently contain a native `skill_invoked` event. The plugin therefore uses high-confidence detection only:
 
 - If tool arguments directly contain a `.../SKILL.md` path, create the matching `skill:<name>` span.
-- If later tool arguments within the same `llm` step keep accessing files under the same skill directory, merge them into the same `skill:<name>` span instead of creating another skill span.
+- If later tool arguments keep accessing files under the same skill directory, attribute each confirmed access to its own corresponding tool call. Do not merge different tools into an `llm -> skill` span.
 - If the transcript only mentions a skill name, only lists skills, or cannot be stably linked to a skill directory, no `skill:*` span is created.
 
 ## Resource Attributes
@@ -120,12 +119,12 @@ As of 2026-06-25, `skill` still has no first-class OpenTelemetry GenAI semantic 
 
 | Field | Meaning | Typical spans |
 | --- | --- | --- |
-| `gen_ai.usage.input_tokens` | input tokens, including cache-hit input tokens | `llm` |
-| `gen_ai.usage.output_tokens` | output tokens | `llm` |
-| `gen_ai.usage.cache_read.input_tokens` | provider-managed cache-hit input tokens | `llm` |
-| `gen_ai.usage.reasoning.output_tokens` | reasoning output tokens | `llm` |
+| `gen_ai.usage.input_tokens` | input tokens, including cache-hit input tokens | `invoke_agent`, `llm` |
+| `gen_ai.usage.output_tokens` | output tokens | `invoke_agent`, `llm` |
+| `gen_ai.usage.cache_read.input_tokens` | provider-managed cache-hit input tokens | `invoke_agent`, `llm` |
+| `gen_ai.usage.reasoning.output_tokens` | reasoning output tokens | `invoke_agent`, `llm` |
 
-`gen_ai.usage.*` is emitted only on `llm` spans and always describes a single model call. `invoke_agent` and `assistant` spans do not carry token usage to avoid double counting and oversized root-span tags.
+`llm.gen_ai.usage.*` always describes one model call. `invoke_agent.gen_ai.usage.*` contains the current turn aggregate, preferably from Codex `total_token_usage` and otherwise from the sum of its model calls. `assistant` spans do not carry token usage.
 
 `gen_ai.usage.input_tokens` follows the OpenTelemetry meaning of full input tokens, so it differs from older `usage_input_tokens` semantics that excluded cached input tokens.
 
@@ -136,7 +135,8 @@ As of 2026-06-25, `skill` still has no first-class OpenTelemetry GenAI semantic 
 | `gen_ai.tool.name` | tool name | `tool:*` |
 | `gen_ai.tool.call.id` | tool call ID | `tool:*` |
 | `gen_ai.tool.call.arguments` | clipped tool argument preview | `tool:*` |
-| `gen_ai.tool.call.result` | raw tool result content; strings keep original line breaks, objects and arrays keep their structure | `tool:*` |
+| `gen_ai.tool.call.result` | clipped tool result; strings keep original line breaks, objects and arrays keep their structure | `tool:*` |
+| `triggered_by.llm_span_id` | span ID of the `llm` call that triggered the tool | `tool:*` |
 
 `tool_command` is still preserved as a project field and is extracted from `args.cmd` or `args.command`.
 
@@ -176,7 +176,7 @@ To avoid separate trace chains for the same `turn_id` in intermediate and termin
 
 Blank turns that contain only startup context and no real user input, model output, tool call, or token usage are not uploaded.
 
-`llm` span duration currently includes `ttft`. The implementation shifts the `llm` start time back to the time the model request was initiated, while also preserving the first-token wait as a separate `ttft` field so the UI can display the real end-to-end duration directly.
+`llm` span duration includes `ttft` but ends at the model-call `token_count` boundary. The implementation shifts the start time back to the inferred request start and stores the wait separately in `ttft`; later assistant and tool events cannot extend the model-call duration.
 
 ## Field Migration Notes
 

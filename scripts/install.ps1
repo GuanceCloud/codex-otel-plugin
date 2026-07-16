@@ -85,10 +85,13 @@ if (-not (Test-Path -LiteralPath $HookSource -PathType Leaf)) { throw "Cannot fi
 if (-not (Test-Path -LiteralPath $ConfigHelper -PathType Leaf)) { throw "Cannot find $ConfigHelper" }
 
 $NodeBin = Resolve-Node
-$NodeMajor = & $NodeBin -p 'Number(process.versions.node.split(".")[0])'
-if ($LASTEXITCODE -ne 0 -or [int]$NodeMajor -lt 22) {
-  $foundVersion = & $NodeBin -v
-  throw "Node.js >= 22 is required. Found: $foundVersion at $NodeBin"
+$NodeVersion = (& $NodeBin --version | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $NodeVersion -notmatch '^v?(\d+)(?:\.|$)') {
+  throw "Unable to determine Node.js version at $NodeBin. Output: $NodeVersion"
+}
+$NodeMajor = [int]$Matches[1]
+if ($NodeMajor -lt 22) {
+  throw "Node.js >= 22 is required. Found: $NodeVersion at $NodeBin"
 }
 
 $ConfigAlreadyExists = Test-Path -LiteralPath $ConfigFile -PathType Leaf
@@ -103,7 +106,12 @@ $MarketplaceName = "codex-otel-plugin"
 $PluginName = "tracing"
 $MarketplaceRoot = Join-Path $CodexHome "plugin-sources\$MarketplaceName"
 $PluginRoot = Join-Path $MarketplaceRoot "plugins\$PluginName"
-$Version = (& $NodeBin -e 'console.log(require(process.argv[1]).version)' (Join-Path $RepoRoot "package.json")).Trim()
+$PackageJsonPath = Join-Path $RepoRoot "package.json"
+$PackageMetadata = Get-Content -LiteralPath $PackageJsonPath -Raw | ConvertFrom-Json
+$Version = [string]$PackageMetadata.version
+if ([string]::IsNullOrWhiteSpace($Version)) {
+  throw "Cannot determine plugin version from $PackageJsonPath"
+}
 $CachePluginRoot = Join-Path $CodexHome "plugins\cache\$MarketplaceName\$PluginName\$Version"
 $CacheHookScript = Join-Path $CachePluginRoot "src\codex-hook-wrapper.js"
 $NodePowerShellLiteral = $NodeBin.Replace("'", "''")

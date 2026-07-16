@@ -110,3 +110,14 @@ test("disabled hook exits before reading stdin or transcript", async () => {
   assert.equal(readAttempted, false);
   assert.match(await readFile(logFile, "utf-8"), /gtrace disabled/);
 });
+
+test("PowerShell installer avoids node eval when resolving versions", async () => {
+  const installer = await readFile(
+    new URL("../scripts/install.ps1", import.meta.url),
+    "utf-8",
+  );
+
+  assert.doesNotMatch(installer, /&\s+\$NodeBin\s+-(?:e|p)\b/);
+  assert.match(installer, /&\s+\$NodeBin\s+--version/);
+  assert.match(installer, /Get-Content[^\r\n]+PackageJsonPath[^\r\n]*\|\s*ConvertFrom-Json/);
+});

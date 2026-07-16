@@ -11,6 +11,15 @@ The Codex hook loads configuration in this order:
 
 Runtime configuration is file-based only. Environment-variable overrides are no longer supported.
 
+## Script Switch
+
+`enabled` is the Stop hook script switch:
+
+- `true`: read the rollout transcript and upload terminal turns.
+- `false`: return immediately before reading stdin or the transcript; no trace or metric request is sent.
+
+The plugin can stay installed and enabled in Codex while this runtime switch is `false`. Changing the JSON value takes effect on the next Stop hook invocation. Normal upgrades preserve the existing value. Use `--enable-script` / `--disable-script` on Linux and macOS, or `-EnableScript` / `-DisableScript` on Windows, only when the installer should change it.
+
 ## Recommended Dataway / GTrace Config
 
 ```json

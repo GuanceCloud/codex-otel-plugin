@@ -4,7 +4,7 @@ import * as path from "node:path";
 
 function readJsonIfExists(file) {
   try {
-    return JSON.parse(fs.readFileSync(file, "utf-8"));
+    return JSON.parse(fs.readFileSync(file, "utf-8").replace(/^\uFEFF/, ""));
   } catch {
     return undefined;
   }

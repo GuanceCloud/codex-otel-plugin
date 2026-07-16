@@ -1,5 +1,5 @@
 import http from "node:http";
-import { URL } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 import { gunzip, inflate } from "node:zlib";
 import { promisify } from "node:util";
 
@@ -14,9 +14,10 @@ import {
   normalizeExportTraceRequest,
 } from "./otlp.js";
 import { FileStore } from "./store.js";
+import { isMainModule } from "./codex-utils.js";
 
 const DEFAULT_PORT = 3030;
-const DEFAULT_DATA_DIR = new URL("../data", import.meta.url).pathname;
+const DEFAULT_DATA_DIR = fileURLToPath(new URL("../data", import.meta.url));
 const gunzipAsync = promisify(gunzip);
 const inflateAsync = promisify(inflate);
 
@@ -215,7 +216,7 @@ function sendJson(res, status, body) {
   res.end(`${JSON.stringify(body)}\n`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   const port = Number.parseInt(process.env.PORT ?? `${DEFAULT_PORT}`, 10);
   const server = createServer();
   server.listen(port, () => {

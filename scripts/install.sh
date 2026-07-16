@@ -18,6 +18,7 @@ TRACE_PATH="${GTRACE_TRACE_PATH:-${CODEX_OTEL_TRACE_PATH:-}}"
 METRICS_PATH="${GTRACE_METRICS_PATH:-${CODEX_OTEL_METRICS_PATH:-}}"
 X_TOKEN="${GTRACE_X_TOKEN:-${X_TOKEN:-}}"
 DEBUG="${GTRACE_CODEX_DEBUG:-true}"
+SCRIPT_ENABLED=""
 TAGS=()
 HEADERS=()
 TRACE_PATH_EXPLICIT=0
@@ -89,7 +90,7 @@ check_node_version() {
 usage() {
   cat <<HELP
 Usage:
-  scripts/install.sh [--refresh] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--trace-path PATH] [--metrics-path PATH] [--tag KEY=VALUE] [--no-config]
+  scripts/install.sh [--refresh] [--type gtrace|otlp] [--endpoint URL] [--x-token TOKEN] [--trace-path PATH] [--metrics-path PATH] [--tag KEY=VALUE] [--enable-script|--disable-script] [--no-config]
 
 Options:
   --refresh        Remove and re-add the installed plugin cache through Codex CLI.
@@ -102,6 +103,8 @@ Options:
   --tag            Global resource attribute as KEY=VALUE. Written to resourceAttributes. Can be repeated.
   --config-file    Config file. Default: $CODEX_HOME/gtrace.json.
   --codex-config   Codex config file. Default: $CODEX_HOME/config.toml.
+  --enable-script  Set enabled=true in gtrace.json.
+  --disable-script Set enabled=false in gtrace.json. The Stop hook exits before reading the transcript.
   --no-config      Install plugin files only; do not create or update gtrace.json.
 
 Environment variables:
@@ -127,6 +130,12 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --no-config)
       WRITE_CONFIG=0
+      ;;
+    --enable-script|--enable)
+      SCRIPT_ENABLED=true
+      ;;
+    --disable-script|--disable)
+      SCRIPT_ENABLED=false
       ;;
     --type)
       shift
@@ -375,81 +384,7 @@ write_codex_config() {
   CODEX_MARKETPLACE_ROOT_RUNTIME="$MARKETPLACE_ROOT" \
   CODEX_PLUGIN_SELECTOR_RUNTIME="$PLUGIN_NAME@$MARKETPLACE_NAME" \
   CODEX_CONFLICTING_PLUGIN_SELECTORS_RUNTIME="$CONFLICTING_PLUGIN_SELECTORS_JSON" \
-  "$NODE_BIN" <<'NODE'
-const fs = require("fs");
-const path = require("path");
-
-const configFile = process.env.CODEX_CONFIG_FILE_RUNTIME;
-const marketplaceName = process.env.CODEX_MARKETPLACE_NAME_RUNTIME;
-const marketplaceRoot = process.env.CODEX_MARKETPLACE_ROOT_RUNTIME;
-const pluginSelector = process.env.CODEX_PLUGIN_SELECTOR_RUNTIME;
-const conflictingPluginSelectors = JSON.parse(
-  process.env.CODEX_CONFLICTING_PLUGIN_SELECTORS_RUNTIME || "[]",
-);
-
-function tomlString(value) {
-  return JSON.stringify(String(value));
-}
-
-function removeSection(source, header) {
-  const lines = source.split(/\n/);
-  const out = [];
-  let skipping = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (/^\[[^\]]+\]/.test(trimmed)) {
-      skipping = trimmed === header;
-      if (skipping) continue;
-    }
-    if (!skipping) out.push(line);
-  }
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
-}
-
-function removeSectionsMatching(source, predicate) {
-  const lines = source.split(/\n/);
-  const out = [];
-  let skipping = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (/^\[[^\]]+\]/.test(trimmed)) {
-      skipping = predicate(trimmed);
-      if (skipping) continue;
-    }
-    if (!skipping) out.push(line);
-  }
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
-}
-
-fs.mkdirSync(path.dirname(configFile), { recursive: true });
-let content = "";
-if (fs.existsSync(configFile)) {
-  content = fs.readFileSync(configFile, "utf8");
-}
-
-const marketplaceHeader = `[marketplaces.${marketplaceName}]`;
-const quotedMarketplaceHeader = `[marketplaces.${tomlString(marketplaceName)}]`;
-const pluginHeader = `[plugins.${tomlString(pluginSelector)}]`;
-content = removeSection(content, marketplaceHeader);
-content = removeSection(content, quotedMarketplaceHeader);
-content = removeSection(content, pluginHeader);
-for (const selector of conflictingPluginSelectors) {
-  content = removeSection(content, `[plugins.${tomlString(selector)}]`);
-  const hookStatePrefix = `[hooks.state.${tomlString(selector).slice(0, -1)}:`;
-  content = removeSectionsMatching(content, (header) => header.startsWith(hookStatePrefix));
-}
-
-const nextSections = [
-  `${marketplaceHeader}
-source_type = "local"
-source = ${tomlString(marketplaceRoot)}`,
-  `${pluginHeader}
-enabled = true`,
-];
-
-const next = `${content.trimEnd()}${content.trim() ? "\n\n" : ""}${nextSections.join("\n\n")}\n`;
-fs.writeFileSync(configFile, next, "utf8");
-NODE
+  "$NODE_BIN" "$REPO_ROOT/scripts/install-config.js" write-codex-config
 }
 
 sync_plugin_cache
@@ -473,105 +408,14 @@ write_config() {
   GTRACE_INSTALL_TYPE_RUNTIME="$INSTALL_TYPE" \
   GTRACE_X_TOKEN_RUNTIME="$X_TOKEN" \
   GTRACE_DEBUG_RUNTIME="$DEBUG" \
+  GTRACE_SCRIPT_ENABLED_RUNTIME="$SCRIPT_ENABLED" \
   GTRACE_TAGS_RUNTIME="$tags_json" \
   GTRACE_HEADERS_RUNTIME="$headers_json" \
-  "$NODE_BIN" <<'NODE'
-const fs = require("fs");
-const path = require("path");
-
-const configFile = process.env.GTRACE_CONFIG_FILE_RUNTIME;
-const endpoint = process.env.GTRACE_ENDPOINT_RUNTIME || "";
-const tracePath = process.env.GTRACE_TRACE_PATH_RUNTIME || "";
-const metricsPath = process.env.GTRACE_METRICS_PATH_RUNTIME || "";
-const installType = process.env.GTRACE_INSTALL_TYPE_RUNTIME || "gtrace";
-const xToken = process.env.GTRACE_X_TOKEN_RUNTIME || "";
-const debug = process.env.GTRACE_DEBUG_RUNTIME !== "false";
-const tags = JSON.parse(process.env.GTRACE_TAGS_RUNTIME || "[]");
-const extraHeaders = JSON.parse(process.env.GTRACE_HEADERS_RUNTIME || "[]");
-
-function canonicalHeaderName(key) {
-  const normalized = String(key).trim().toLowerCase().replace(/_/g, "-");
-  if (!normalized) return "";
-  if (normalized === "to-headless") return "To-Headless";
-  if (normalized === "x-token") return "X-Token";
-  if (normalized === "authorization") return "Authorization";
-  return String(key).trim();
-}
-
-function normalizeHeaders(headers) {
-  const next = {};
-  if (!headers || typeof headers !== "object" || Array.isArray(headers)) return next;
-  for (const [key, value] of Object.entries(headers)) {
-    if (typeof value !== "string" || !value.trim()) continue;
-    const canonicalKey = canonicalHeaderName(key);
-    if (!canonicalKey) continue;
-    next[canonicalKey] = value.trim();
-  }
-  return next;
-}
-
-let config = {};
-if (fs.existsSync(configFile)) {
-  const raw = fs.readFileSync(configFile, "utf8").trim();
-  if (raw) config = JSON.parse(raw);
-}
-
-config.enabled = true;
-if (endpoint) config.endpoint = endpoint;
-if (tracePath) config.tracePath = tracePath;
-if (metricsPath) config.metricsPath = metricsPath;
-config.debug = debug;
-config.headers = normalizeHeaders(config.headers);
-
-if (installType === "gtrace") {
-  config.headers["To-Headless"] ??= "true";
-}
-if (xToken) {
-  config.headers["X-Token"] = xToken;
-}
-for (const header of extraHeaders) {
-  const [key, ...rest] = String(header).split("=");
-  if (!key || rest.length === 0) continue;
-  const canonicalKey = canonicalHeaderName(key);
-  if (!canonicalKey) continue;
-  config.headers[canonicalKey] = rest.join("=").trim();
-}
-if (Object.keys(config.headers).length === 0) {
-  delete config.headers;
-}
-
-config.metadata = config.metadata && typeof config.metadata === "object" && !Array.isArray(config.metadata)
-  ? config.metadata
-  : {};
-config.resourceAttributes = config.resourceAttributes && typeof config.resourceAttributes === "object" && !Array.isArray(config.resourceAttributes)
-  ? config.resourceAttributes
-  : {};
-if (Array.isArray(config.tags)) {
-  for (const tag of config.tags) {
-    const [key, ...rest] = String(tag).split("=");
-    if (!key || rest.length === 0) continue;
-    const value = rest.join("=");
-    if (!(key in config.resourceAttributes)) config.resourceAttributes[key] = value;
-  }
-  delete config.tags;
-}
-for (const tag of tags) {
-  const [key, ...rest] = String(tag).split("=");
-  if (!key || rest.length === 0) continue;
-  const value = rest.join("=");
-  config.resourceAttributes[key] = value;
-  if (config.metadata[key] === value) delete config.metadata[key];
-}
-if (Object.keys(config.metadata).length === 0) delete config.metadata;
-if (Object.keys(config.resourceAttributes).length === 0) delete config.resourceAttributes;
-
-fs.mkdirSync(path.dirname(configFile), { recursive: true });
-fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-NODE
+  "$NODE_BIN" "$REPO_ROOT/scripts/install-config.js" write-gtrace-config
 }
 
 if [[ "$WRITE_CONFIG" -eq 1 ]]; then
-  if [[ -n "$ENDPOINT" || -f "$CONFIG_FILE" ]]; then
+  if [[ -n "$ENDPOINT" || -f "$CONFIG_FILE" || -n "$SCRIPT_ENABLED" ]]; then
     write_config
     log "updated $CONFIG_FILE"
     if [[ -n "$ENDPOINT" ]]; then

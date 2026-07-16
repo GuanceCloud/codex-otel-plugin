@@ -1,11 +1,13 @@
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import { collectRollout } from "./codex-collector.js";
 import { resolveConfig } from "./codex-config.js";
 import { buildCodexMetrics } from "./codex-metrics.js";
 import { codexMetricsToOtlpProtobufRequest, codexSpansToOtlpProtobufRequest } from "./codex-otlp.js";
 import { acquireRolloutLock, markTurnUploaded, releaseRolloutLock } from "./codex-sidecar.js";
-import { readStdin } from "./codex-utils.js";
+import { isMainModule, readStdin } from "./codex-utils.js";
 import { encodeExportMetricsServiceRequest, encodeExportTraceServiceRequest } from "./proto.js";
 
 function safeResolveConfig() {
@@ -15,9 +17,7 @@ function safeResolveConfig() {
     return {
       debug: false,
       fail_on_error: false,
-      hook_log_file: process.env.HOME
-        ? `${process.env.HOME}/.codex/gtrace-hook.log`
-        : ".codex/gtrace-hook.log",
+      hook_log_file: path.join(os.homedir(), ".codex", "gtrace-hook.log"),
     };
   }
 }
@@ -146,16 +146,16 @@ async function handleHookFailure(error, config = safeResolveConfig(), extra = {}
 
 export async function runHook(options = {}) {
   const config = options.config ?? resolveConfig();
-  const hookInput = options.hookInput ?? (await readStdin());
+  if (!config.enabled) {
+    await appendLog(config, "gtrace disabled");
+    return;
+  }
+  const hookInput = options.hookInput ?? (await (options.readHookInput ?? readStdin)());
   await appendLog(config, "hook invoked", {
     pid: process.pid,
     cwd: process.cwd(),
     transcript_path: hookInput.transcript_path ?? null,
   });
-  if (!config.enabled) {
-    await appendLog(config, "gtrace disabled");
-    return;
-  }
   if (!hookInput.transcript_path) {
     await appendLog(config, "hook payload missing transcript_path");
     return;
@@ -197,7 +197,7 @@ export async function runHook(options = {}) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   process.on("unhandledRejection", (error) => {
     void handleHookFailure(error, safeResolveConfig(), { phase: "unhandledRejection" });
   });

@@ -62,6 +62,8 @@ Install options are passed to scripts/install.sh:
   --metrics-path PATH
   --header KEY=VALUE
   --tag KEY=VALUE        Global resource attribute; can be repeated.
+  --enable-script
+  --disable-script       Keep the plugin installed but make the Stop hook exit immediately.
   --config-file PATH
   --codex-config PATH
   --no-config

@@ -2,6 +2,14 @@
 
 按日期记录项目功能与代码提交。
 
+## 2026-07-16
+
+- 发布 `v0.1.13`
+- 新增 Windows 本地与远程 PowerShell 安装器，发布构建同时生成 ZIP 资产
+- 明确 `gtrace.json.enabled` 为 hook 脚本启停开关，关闭时在读取 stdin/transcript 前退出
+- Linux/macOS 与 Windows 安装器支持显式启停参数，普通升级保留已有 `enabled` 值
+- 修复 Windows 下 ESM 入口文件 URL 判断和默认数据目录路径转换
+
 ## 2026-07-02
 
 - 发布 `v0.1.12`

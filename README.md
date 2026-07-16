@@ -44,7 +44,8 @@ POST <endpoint>/<metricsPath>
 Requirements:
 
 - Node.js >= 22
-- `curl`, `tar`, and `gzip` for remote installation
+- Linux/macOS: `curl`, `tar`, and `gzip` for remote installation
+- Windows: Windows PowerShell 5.1+ or PowerShell 7+
 
 The recommended path is the remote installer:
 
@@ -55,11 +56,21 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
       --x-token <token>
 ```
 
+On Windows PowerShell:
+
+```powershell
+$installer = Join-Path $env:TEMP "codex-otel-install.ps1"
+Invoke-WebRequest https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.ps1 -OutFile $installer
+powershell -ExecutionPolicy Bypass -File $installer -Version latest -Endpoint https://llm-openway.guance.com -XToken "<token>"
+```
+
 Restart Codex after installation so the Stop hook is reloaded.
 
 If `codex-observability-plugin` is also installed on the same machine, the installer removes its `tracing` plugin and clears stale config entries so the same transcript is not uploaded twice.
 
 If the receiver is occasionally slow, the default timeout for a single OTLP HTTP request is `25000ms`. You can override it with `timeout_ms` in `~/.codex/gtrace.json`.
+
+Set `enabled` in `~/.codex/gtrace.json` to control hook execution. When it is `false`, the hook exits before reading the transcript or sending data. Installer flags `--enable-script` / `--disable-script` and PowerShell switches `-EnableScript` / `-DisableScript` update this value explicitly; upgrades otherwise preserve it.
 
 See [docs/install.md](docs/install.md) for installation, upgrade, uninstall, and installer options.
 

@@ -80,6 +80,8 @@ Codex hook 读取配置顺序：
 
 运行时配置只支持 `gtrace.json` 文件，不再支持通过环境变量覆盖。
 
+`enabled` 是 hook 脚本运行开关。`false` 时 hook 必须在读取 stdin/transcript 和上报前立即退出。安装器在普通安装/升级时应保留已有值，只有 Linux/macOS 的 `--enable-script` / `--disable-script` 或 Windows 的 `-EnableScript` / `-DisableScript` 才显式修改。
+
 推荐 Dataway/GTrace 风格：
 
 ```json

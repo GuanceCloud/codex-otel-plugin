@@ -5,7 +5,8 @@ This document describes runtime requirements, installation methods, upgrade flow
 ## Requirements
 
 - Node.js >= 22
-- `curl`, `tar`, and `gzip` are required for remote installation
+- Linux/macOS remote install: `curl`, `tar`, and `gzip`
+- Windows remote install: Windows PowerShell 5.1+ or PowerShell 7+; the installer uses the built-in ZIP extraction support
 - no runtime npm dependencies are required
 
 Codex triggers the Stop hook, but it does not provide a Node.js runtime for the hook. The current hook is a Node.js script, so the target environment must have Node.js 22+ installed.
@@ -17,7 +18,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
   | CODEX_OTEL_NODE=/path/to/node bash -s -- latest --endpoint <endpoint> --x-token <token>
 ```
 
-## Remote Installation
+## Linux and macOS Remote Installation
 
 The remote installer is the recommended path. It does not require `git clone`:
 
@@ -53,6 +54,54 @@ See [configuration.md](configuration.md) for the default `~/.codex/gtrace.json` 
 
 Restart Codex after installation so the Stop hook is reloaded.
 
+## Windows Installation
+
+Download and execute the PowerShell release installer:
+
+```powershell
+$installer = Join-Path $env:TEMP "codex-otel-install.ps1"
+Invoke-WebRequest https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.ps1 -OutFile $installer
+powershell -ExecutionPolicy Bypass -File $installer `
+  -Version latest `
+  -Endpoint https://llm-openway.guance.com `
+  -XToken "<token>"
+```
+
+When using PowerShell 7, replace `powershell` with `pwsh`. The remote installer downloads `codex-otel-plugin.zip`, expands it into a temporary directory, and invokes `scripts/install.ps1`. It creates the marketplace, plugin cache, hook JSON, `config.toml`, and `gtrace.json` under `%USERPROFILE%\.codex` by default. The generated hook command uses `powershell.exe` as a stable Windows launcher and safely quotes Node.js and plugin paths containing spaces.
+
+For a development install from a local checkout:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 `
+  -Refresh `
+  -Endpoint https://llm-openway.guance.com `
+  -XToken "<token>"
+```
+
+Restart Codex after installation.
+
+## Enable or Disable Collection
+
+Keep the plugin installed and turn its hook work on or off with `enabled` in `%USERPROFILE%\.codex\gtrace.json` (Windows) or `~/.codex/gtrace.json` (Linux/macOS):
+
+```json
+{
+  "enabled": false
+}
+```
+
+When disabled, the Stop hook exits before reading stdin or the transcript and sends no trace or metric requests. A normal install or upgrade preserves an existing `enabled` value. To change it explicitly during installation:
+
+```bash
+./scripts/install.sh --disable-script
+./scripts/install.sh --enable-script
+```
+
+```powershell
+.\scripts\install.ps1 -DisableScript
+.\scripts\install.ps1 -EnableScript
+```
+
 ## Install Files Only
 
 To install plugin files without writing config yet:
@@ -60,6 +109,12 @@ To install plugin files without writing config yet:
 ```bash
 curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.sh \
   | bash -s -- latest --no-config
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -NoConfig
 ```
 
 ## Minimum Validation
@@ -81,6 +136,13 @@ Expected results:
 - the cache directory contains a version directory such as `~/.codex/plugins/cache/codex-otel-plugin/tracing/0.1.5`
 - `~/.codex/gtrace.json` contains `endpoint`, `tracePath`, `metricsPath`, and `headers.X-Token`
 
+Windows PowerShell equivalents for the filesystem and config checks are:
+
+```powershell
+Get-ChildItem "$env:USERPROFILE\.codex\plugins\cache\codex-otel-plugin\tracing" -Directory
+Get-Content "$env:USERPROFILE\.codex\gtrace.json"
+```
+
 ## Upgrade
 
 Use the same installer command to upgrade. If the environment is already installed, `--endpoint` and `--x-token` may be omitted because the script reuses the existing `~/.codex/gtrace.json`:
@@ -90,7 +152,7 @@ curl -fsSL https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/down
   | bash -s -- latest
 ```
 
-The upgrade flow re-downloads plugin files, rewrites plugin and hook config, updates `~/.codex/config.toml`, and refreshes the Codex plugin cache. It does not overwrite `~/.codex/gtrace.json`.
+The upgrade flow re-downloads plugin files, rewrites plugin and hook config, updates `~/.codex/config.toml`, refreshes the Codex plugin cache, and merges installer-managed values into the existing `gtrace.json`. Existing endpoint/path values are kept when they are not supplied, and `enabled` is preserved unless an explicit enable/disable flag is used. On Windows, rerun the same `install-release.ps1` command; `-Endpoint` and `-XToken` may likewise be omitted.
 
 Install a specific version:
 
@@ -124,7 +186,17 @@ rm -rf ~/.codex/plugins/cache/codex-otel-plugin
 rm -f ~/.codex/gtrace.json
 ```
 
-If you only want to disable the plugin while keeping installation files, running this is enough:
+Windows PowerShell:
+
+```powershell
+codex plugin remove tracing@codex-otel-plugin
+codex plugin marketplace remove codex-otel-plugin
+Remove-Item "$env:USERPROFILE\.codex\plugin-sources\codex-otel-plugin" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.codex\plugins\cache\codex-otel-plugin" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.codex\gtrace.json" -Force -ErrorAction SilentlyContinue
+```
+
+If you only want to pause collection while keeping the plugin installed, set `enabled=false` or use the installer disable switch described above. To disable plugin loading entirely while keeping its files, remove it from Codex:
 
 ```bash
 codex plugin remove tracing@codex-otel-plugin
@@ -146,7 +218,11 @@ Do not manually delete `~/.codex/plugin-sources/codex-otel-plugin` before runnin
 | `--tag KEY=VALUE` | Extra global resource attribute. Repeatable |
 | `--config-file PATH` | Upload config path. Default: `~/.codex/gtrace.json` |
 | `--codex-config PATH` | Codex config path. Default: `~/.codex/config.toml` |
+| `--enable-script` | Explicitly write `enabled=true`; aliases: `--enable` |
+| `--disable-script` | Explicitly write `enabled=false`; aliases: `--disable` |
 | `--no-config` | Install the plugin without writing `gtrace.json` |
+
+PowerShell uses the corresponding parameter names: `-Endpoint`, `-XToken`, `-TracePath`, `-MetricsPath`, `-Type`, repeated/array `-Header` and `-Tag`, `-ConfigFile`, `-CodexConfig`, `-EnableScript`, `-DisableScript`, `-NoConfig`, and `-Refresh`.
 
 ## Development Install
 

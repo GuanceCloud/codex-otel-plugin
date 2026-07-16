@@ -69,8 +69,18 @@ try {
   if ($NoDebug) { $InstallParameters.NoDebug = $true }
 
   Write-Host "Installing plugin from temporary archive"
-  & $Installer @InstallParameters
-  if (-not $?) { throw "Plugin installer failed." }
+  # Execute the downloaded installer from memory. Invoking the extracted .ps1
+  # file directly is blocked on Windows systems whose execution policy is
+  # Restricted, even when this bootstrap script itself was created in memory.
+  $PreviousRepoRoot = $env:REPO_ROOT
+  try {
+    $env:REPO_ROOT = $ExtractPath
+    $InstallerScript = [scriptblock]::Create([IO.File]::ReadAllText($Installer))
+    & $InstallerScript @InstallParameters
+    if (-not $?) { throw "Plugin installer failed." }
+  } finally {
+    $env:REPO_ROOT = $PreviousRepoRoot
+  }
 } finally {
   if (Test-Path -LiteralPath $TempRoot) {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -68,6 +68,35 @@ export function writeCodexConfig(options) {
   fs.writeFileSync(configFile, next, "utf8");
 }
 
+export function writeHooksConfig({ hooksFile, command }) {
+  let config = {};
+  if (fs.existsSync(hooksFile)) {
+    const raw = fs.readFileSync(hooksFile, "utf8").trim();
+    if (raw) config = JSON.parse(raw);
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) config = {};
+  if (!config.hooks || typeof config.hooks !== "object" || Array.isArray(config.hooks)) {
+    config.hooks = {};
+  }
+  const stopGroups = Array.isArray(config.hooks.Stop) ? config.hooks.Stop : [];
+  config.hooks.Stop = stopGroups.filter((group) => {
+    const handlers = Array.isArray(group?.hooks) ? group.hooks : [];
+    return !handlers.some((handler) =>
+      typeof handler?.command === "string" && handler.command.includes("codex-hook-wrapper.js")
+    );
+  });
+  config.hooks.Stop.push({
+    hooks: [{
+      type: "command",
+      command,
+      timeout: 60,
+      statusMessage: "Uploading Codex trace to GTrace",
+    }],
+  });
+  fs.mkdirSync(path.dirname(hooksFile), { recursive: true });
+  fs.writeFileSync(hooksFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
 function canonicalHeaderName(key) {
   const normalized = String(key).trim().toLowerCase().replace(/_/g, "-");
   if (!normalized) return "";
@@ -190,6 +219,12 @@ function optionsFromEnvironment(action) {
       conflictingPluginSelectors: parseJson(process.env.CODEX_CONFLICTING_PLUGIN_SELECTORS_RUNTIME, []),
     };
   }
+  if (action === "write-hooks-config") {
+    return {
+      hooksFile: process.env.CODEX_HOOKS_FILE_RUNTIME,
+      command: process.env.CODEX_HOOK_COMMAND_RUNTIME,
+    };
+  }
   return {
     configFile: process.env.GTRACE_CONFIG_FILE_RUNTIME,
     endpoint: process.env.GTRACE_ENDPOINT_RUNTIME,
@@ -207,6 +242,7 @@ function optionsFromEnvironment(action) {
 const action = process.argv[2];
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   if (action === "write-codex-config") writeCodexConfig(optionsFromEnvironment(action));
+  else if (action === "write-hooks-config") writeHooksConfig(optionsFromEnvironment(action));
   else if (action === "write-gtrace-config") writeGtraceConfig(optionsFromEnvironment(action));
   else throw new Error(`Unsupported installer config action: ${action || "<empty>"}`);
 }

@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$CODEX_HOME/config.toml}"
+HOOKS_FILE="${CODEX_HOOKS_FILE:-$CODEX_HOME/hooks.json}"
 CONFIG_FILE="${GTRACE_CONFIG_FILE:-$CODEX_HOME/gtrace.json}"
 MARKETPLACE_NAME="${MARKETPLACE_NAME:-codex-otel-plugin}"
 PLUGIN_NAME="${PLUGIN_NAME:-tracing}"
@@ -271,7 +272,7 @@ CACHE_PLUGIN_ROOT="$CODEX_HOME/plugins/cache/$MARKETPLACE_NAME/$PLUGIN_NAME/$VER
 CACHE_HOOK_SCRIPT="$CACHE_PLUGIN_ROOT/src/codex-hook-wrapper.js"
 HOOK_COMMAND="$NODE_BIN $CACHE_HOOK_SCRIPT"
 
-mkdir -p "$PLUGIN_ROOT/.codex-plugin" "$PLUGIN_ROOT/hooks" "$MARKETPLACE_ROOT/.agents/plugins"
+mkdir -p "$PLUGIN_ROOT/.codex-plugin" "$MARKETPLACE_ROOT/.agents/plugins"
 
 cleanup_legacy_marketplace_runtime() {
   if [[ "$MARKETPLACE_ROOT" == "$REPO_ROOT" ]]; then
@@ -291,7 +292,7 @@ cleanup_legacy_marketplace_runtime() {
 cleanup_legacy_marketplace_runtime
 
 sync_plugin_runtime() {
-  rm -rf "$PLUGIN_ROOT/src" "$PLUGIN_ROOT/package.json" "$PLUGIN_ROOT/package-lock.json"
+  rm -rf "$PLUGIN_ROOT/src" "$PLUGIN_ROOT/hooks" "$PLUGIN_ROOT/package.json" "$PLUGIN_ROOT/package-lock.json"
   cp -R "$REPO_ROOT/src" "$PLUGIN_ROOT/src"
   cp "$REPO_ROOT/package.json" "$PLUGIN_ROOT/package.json"
   if [[ -f "$REPO_ROOT/package-lock.json" ]]; then
@@ -332,7 +333,6 @@ cat > "$PLUGIN_ROOT/.codex-plugin/plugin.json" <<JSON
   "author": {
     "name": "Guance"
   },
-  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "GTrace Codex Observe",
     "shortDescription": "Trace Codex sessions to GTrace.",
@@ -343,25 +343,6 @@ cat > "$PLUGIN_ROOT/.codex-plugin/plugin.json" <<JSON
       "Read"
     ],
     "defaultPrompt": []
-  }
-}
-JSON
-
-cat > "$PLUGIN_ROOT/hooks/hooks.json" <<JSON
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOOK_COMMAND",
-            "timeout": 60,
-            "statusMessage": "Uploading Codex trace to GTrace"
-          }
-        ]
-      }
-    ]
   }
 }
 JSON
@@ -390,6 +371,10 @@ write_codex_config() {
 sync_plugin_cache
 write_codex_config
 log "updated Codex config: $CODEX_CONFIG_FILE"
+CODEX_HOOKS_FILE_RUNTIME="$HOOKS_FILE" \
+CODEX_HOOK_COMMAND_RUNTIME="$HOOK_COMMAND" \
+"$NODE_BIN" "$REPO_ROOT/scripts/install-config.js" write-hooks-config
+log "updated Codex hooks: $HOOKS_FILE"
 
 write_config() {
   local tags_json='[]'
@@ -475,6 +460,7 @@ If Codex still does not load the plugin after restart, run this to refresh the c
 EOF
 fi
 
+"$NODE_BIN" "$REPO_ROOT/scripts/trust-hook.js" "$(command -v codex)" "$REPO_ROOT"
 sync_plugin_cache
 
 remove_obsolete_marketplace_roots() {

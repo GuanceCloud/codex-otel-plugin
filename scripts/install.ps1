@@ -53,12 +53,54 @@ Install Node.js 22+ or set CODEX_OTEL_NODE to node.exe and retry.
 }
 
 function Invoke-Codex([string[]]$Arguments, [switch]$IgnoreFailure) {
-  & $script:CodexCommand @Arguments | Out-Host
-  $exit = $LASTEXITCODE
+  try {
+    & $script:CodexCommand @Arguments | Out-Host
+    $exit = $LASTEXITCODE
+  } catch {
+    if ($IgnoreFailure) {
+      Write-Verbose "Unable to run codex $($Arguments -join ' '): $($_.Exception.Message)"
+      return 1
+    }
+    throw
+  }
   if ($exit -ne 0 -and -not $IgnoreFailure) {
     throw "codex $($Arguments -join ' ') failed with exit code $exit"
   }
   return $exit
+}
+
+function Test-CodexCommand {
+  try {
+    & $script:CodexCommand --version *> $null
+    return $LASTEXITCODE -eq 0
+  } catch {
+    return $false
+  }
+}
+
+function Resolve-CodexCommand {
+  $candidates = @()
+  if ($env:CODEX_CLI_PATH) { $candidates += $env:CODEX_CLI_PATH }
+  if (Test-Path -LiteralPath $CodexConfig -PathType Leaf) {
+    $configContent = Get-Content -LiteralPath $CodexConfig -Raw
+    $configMatch = [regex]::Match($configContent, "(?m)^CODEX_CLI_PATH\s*=\s*'([^']+)'\s*$")
+    if ($configMatch.Success) { $candidates += $configMatch.Groups[1].Value }
+  }
+  $localCliRoot = Join-Path $env:LOCALAPPDATA "OpenAI\Codex\bin"
+  if (Test-Path -LiteralPath $localCliRoot -PathType Container) {
+    $candidates += Get-ChildItem -LiteralPath $localCliRoot -Filter codex.exe -File -Recurse -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime -Descending |
+      ForEach-Object { $_.FullName }
+  }
+  $pathCommand = Get-Command codex -ErrorAction SilentlyContinue
+  if ($pathCommand) { $candidates += $pathCommand.Source }
+
+  foreach ($candidate in $candidates | Select-Object -Unique) {
+    if (-not $candidate -or -not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+    $script:CodexCommand = $candidate
+    if (Test-CodexCommand) { return $candidate }
+  }
+  return $null
 }
 
 if ($EnableScript -and $DisableScript) {
@@ -81,8 +123,10 @@ if ($Type -eq "otel") { $Type = "otlp" }
 
 $HookSource = Join-Path $RepoRoot "src\codex-hook-wrapper.js"
 $ConfigHelper = Join-Path $RepoRoot "scripts\install-config.js"
+$TrustHookHelper = Join-Path $RepoRoot "scripts\trust-hook.js"
 if (-not (Test-Path -LiteralPath $HookSource -PathType Leaf)) { throw "Cannot find $HookSource" }
 if (-not (Test-Path -LiteralPath $ConfigHelper -PathType Leaf)) { throw "Cannot find $ConfigHelper" }
+if (-not (Test-Path -LiteralPath $TrustHookHelper -PathType Leaf)) { throw "Cannot find $TrustHookHelper" }
 
 $NodeBin = Resolve-Node
 $NodeVersion = (& $NodeBin --version | Out-String).Trim()
@@ -114,6 +158,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 $CachePluginRoot = Join-Path $CodexHome "plugins\cache\$MarketplaceName\$PluginName\$Version"
 $CacheHookScript = Join-Path $CachePluginRoot "src\codex-hook-wrapper.js"
+$HooksFile = Join-Path $CodexHome "hooks.json"
 $NodePowerShellLiteral = $NodeBin.Replace("'", "''")
 $HookPowerShellLiteral = $CacheHookScript.Replace("'", "''")
 $HookCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "& ''{0}'' ''{1}''"' -f $NodePowerShellLiteral, $HookPowerShellLiteral
@@ -121,7 +166,6 @@ $PluginSelector = "$PluginName@$MarketplaceName"
 $ConflictingPluginSelectors = @("tracing@codex-observability-plugin")
 
 [IO.Directory]::CreateDirectory((Join-Path $PluginRoot ".codex-plugin")) | Out-Null
-[IO.Directory]::CreateDirectory((Join-Path $PluginRoot "hooks")) | Out-Null
 [IO.Directory]::CreateDirectory((Join-Path $MarketplaceRoot ".agents\plugins")) | Out-Null
 
 foreach ($legacy in @("src", "scripts", "test", "docs", "README.md", "AGENTS.md", "package.json", "package-lock.json")) {
@@ -129,6 +173,7 @@ foreach ($legacy in @("src", "scripts", "test", "docs", "README.md", "AGENTS.md"
 }
 
 Remove-PathIfPresent (Join-Path $PluginRoot "src")
+Remove-PathIfPresent (Join-Path $PluginRoot "hooks")
 Remove-PathIfPresent (Join-Path $PluginRoot "package.json")
 Remove-PathIfPresent (Join-Path $PluginRoot "package-lock.json")
 Copy-Item -LiteralPath (Join-Path $RepoRoot "src") -Destination (Join-Path $PluginRoot "src") -Recurse
@@ -154,7 +199,6 @@ $Manifest = [ordered]@{
   version = $Version
   description = "Trace Codex sessions to GTrace through OTLP."
   author = [ordered]@{ name = "Guance" }
-  hooks = "./hooks/hooks.json"
   interface = [ordered]@{
     displayName = "GTrace Codex Observe"
     shortDescription = "Trace Codex sessions to GTrace."
@@ -166,20 +210,6 @@ $Manifest = [ordered]@{
   }
 }
 Write-Utf8NoBom (Join-Path $PluginRoot ".codex-plugin\plugin.json") (($Manifest | ConvertTo-Json -Depth 10) + "`n")
-
-$Hooks = [ordered]@{
-  hooks = [ordered]@{
-    Stop = @([ordered]@{
-      hooks = @([ordered]@{
-        type = "command"
-        command = $HookCommand
-        timeout = 60
-        statusMessage = "Uploading Codex trace to GTrace"
-      })
-    })
-  }
-}
-Write-Utf8NoBom (Join-Path $PluginRoot "hooks\hooks.json") (($Hooks | ConvertTo-Json -Depth 10) + "`n")
 
 Write-Host "Wrote local marketplace: $MarketplaceRoot"
 Write-Host "Wrote plugin: $PluginRoot"
@@ -204,6 +234,11 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to update $CodexConfig" }
 
 Sync-PluginCache
 Write-InstallLog "updated Codex config: $CodexConfig"
+$env:CODEX_HOOKS_FILE_RUNTIME = $HooksFile
+$env:CODEX_HOOK_COMMAND_RUNTIME = $HookCommand
+& $NodeBin $ConfigHelper write-hooks-config
+if ($LASTEXITCODE -ne 0) { throw "Failed to update $HooksFile" }
+Write-InstallLog "updated Codex hooks: $HooksFile"
 
 $ScriptEnabled = if ($EnableScript) { "true" } elseif ($DisableScript) { "false" } else { "" }
 $ShouldWriteConfig = -not $NoConfig -and ($Endpoint -or (Test-Path -LiteralPath $ConfigFile) -or $ScriptEnabled)
@@ -232,14 +267,14 @@ if ($ShouldWriteConfig) {
   Write-InstallLog "skipped config because -Endpoint was not provided"
 }
 
-$Codex = Get-Command codex -ErrorAction SilentlyContinue
-if (-not $Codex) {
+$ResolvedCodexCommand = Resolve-CodexCommand
+if (-not $ResolvedCodexCommand) {
   Write-Host ""
-  Write-Host "Codex CLI was not found. Plugin files and config were installed successfully."
+  Write-Warning "No usable Codex CLI was found. Plugin files and config were installed successfully; the optional CLI refresh was skipped."
   Write-Host "Restart Codex so the Stop hook is reloaded."
-  exit 0
+  return
 }
-$script:CodexCommand = $Codex.Source
+$script:CodexCommand = $ResolvedCodexCommand
 
 foreach ($selector in $ConflictingPluginSelectors) {
   Invoke-Codex -Arguments @("plugin", "remove", $selector) -IgnoreFailure | Out-Null
@@ -255,6 +290,8 @@ if ($Refresh) {
 if ((Invoke-Codex -Arguments @("plugin", "add", $PluginSelector) -IgnoreFailure) -ne 0) {
   Write-Warning "Plugin files were written, but Codex CLI did not add the plugin automatically."
 }
+& $NodeBin $TrustHookHelper $script:CodexCommand $RepoRoot
+if ($LASTEXITCODE -ne 0) { throw "Failed to trust the GTrace Codex Stop hook." }
 Sync-PluginCache
 
 foreach ($obsolete in @(

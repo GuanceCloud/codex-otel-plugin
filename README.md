@@ -1,6 +1,6 @@
 # codex-otel-plugin
 
-`codex-otel-plugin` is an observability plugin for Codex. It reads Codex rollout transcripts from the Stop hook, converts each Codex turn into OpenTelemetry OTLP Traces and Metrics, and uploads them over HTTP/protobuf.
+`codex-otel-plugin` is an observability plugin for Codex. It installs a global Codex Stop hook in `~/.codex/hooks.json`, reads Codex rollout transcripts, converts each turn into OpenTelemetry OTLP Traces and Metrics, and uploads them over HTTP/protobuf.
 
 The current implementation uses only built-in Node.js modules and has no runtime npm dependencies.
 
@@ -61,13 +61,14 @@ On Windows PowerShell:
 ```powershell
 $installer = Join-Path $env:TEMP "codex-otel-install.ps1"
 Invoke-WebRequest https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.ps1 -OutFile $installer
-& $installer -Version latest -Endpoint https://llm-openway.guance.com -XToken "<token>"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Version latest -Endpoint https://llm-openway.guance.com -XToken "<token>"
 ```
 
 To add tags on Windows, pass them as a PowerShell array:
 
 ```powershell
-& $installer -Version latest -Endpoint https://llm-openway.guance.com -XToken "<token>" -Tag @("agent_id=agent_5659c3006dfe11f1bf1187f5c0f911c6","agent_name=zp")
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `
+  "& '$installer' -Version latest -Endpoint https://llm-openway.guance.com -XToken '<token>' -Tag @('agent_id=agent_5659c3006dfe11f1bf1187f5c0f911c6','agent_name=zp')"
 ```
 
 Restart Codex after installation so the Stop hook is reloaded.

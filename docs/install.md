@@ -33,6 +33,7 @@ The installer will:
 
 - create a local Codex marketplace at `~/.codex/plugin-sources/codex-otel-plugin`
 - write the plugin `tracing@codex-otel-plugin`
+- merge the tracing Stop hook into `~/.codex/hooks.json` while preserving unrelated hooks
 - remove the conflicting tracing plugin if present: it actively runs `codex plugin remove tracing@codex-observability-plugin` and cleans its stale `plugins.*` / `hooks.state.*` entries to avoid duplicate uploads for the same transcript
 - write the Stop hook command: `node ~/.codex/plugins/cache/codex-otel-plugin/tracing/<version>/src/codex-hook-wrapper.js`
 - update Codex config at `~/.codex/config.toml`
@@ -54,6 +55,8 @@ See [configuration.md](configuration.md) for the default `~/.codex/gtrace.json` 
 
 Restart Codex after installation so the Stop hook is reloaded.
 
+The installer asks Codex's local app-server for the discovered GTrace hook identity and persists its current trust hash. This makes a fresh install or reinstall usable without a separate hook-review prompt while ensuring that a later command change invalidates the old trust. Current Codex versions load user hooks from `~/.codex/hooks.json` rather than from plugin manifests.
+
 ## Windows Installation
 
 Download and execute the PowerShell release installer:
@@ -61,7 +64,7 @@ Download and execute the PowerShell release installer:
 ```powershell
 $installer = Join-Path $env:TEMP "codex-otel-install.ps1"
 Invoke-WebRequest https://github.com/GuanceCloud/codex-otel-plugin/releases/latest/download/install-release.ps1 -OutFile $installer
-& $installer `
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
   -Version latest `
   -Endpoint https://llm-openway.guance.com `
   -XToken "<token>"
@@ -77,14 +80,19 @@ To add tags on Windows, pass them as a PowerShell array:
   -Tag @("agent_id=agent_5659c3006dfe11f1bf1187f5c0f911c6","agent_name=zp")
 ```
 
-If you must launch a new PowerShell process, use `-Command` and invoke the script inside that command block instead of `-File`, because `-File` can split array arguments such as `-Tag`.
+For array arguments such as `-Tag`, invoke the downloaded script from a PowerShell session that was itself started with `-ExecutionPolicy Bypass`, because Windows PowerShell's `-File` argument binding cannot reliably preserve arrays:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `
+  "& '$installer' -Version latest -Endpoint https://llm-openway.guance.com -XToken '<token>' -Tag @('environment=prod','team=platform')"
+```
 
 When using PowerShell 7, replace `powershell` with `pwsh` only for the outer shell process when needed. The remote installer downloads `codex-otel-plugin.zip`, expands it into a temporary directory, and invokes `scripts/install.ps1`. It creates the marketplace, plugin cache, hook JSON, `config.toml`, and `gtrace.json` under `%USERPROFILE%\.codex` by default. The generated hook command uses `powershell.exe` as a stable Windows launcher and safely quotes Node.js and plugin paths containing spaces.
 
 For a development install from a local checkout:
 
 ```powershell
-& .\scripts\install.ps1 `
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 `
   -Refresh `
   -Endpoint https://llm-openway.guance.com `
   -XToken "<token>"
@@ -201,12 +209,27 @@ rm -f ~/.codex/gtrace.json
 Windows PowerShell:
 
 ```powershell
-codex plugin remove tracing@codex-otel-plugin
-codex plugin marketplace remove codex-otel-plugin
+$codex = Get-ChildItem "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe" -File `
+  | Sort-Object LastWriteTime -Descending `
+  | Select-Object -First 1 -ExpandProperty FullName
+
+if (-not $codex) { throw "Cannot find the Codex App CLI." }
+
+# Unregister these before deleting the marketplace source directory.
+& $codex plugin remove tracing@codex-otel-plugin
+& $codex plugin marketplace remove codex-otel-plugin
+
 Remove-Item "$env:USERPROFILE\.codex\plugin-sources\codex-otel-plugin" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:USERPROFILE\.codex\plugins\cache\codex-otel-plugin" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:USERPROFILE\.codex\gtrace.json" -Force -ErrorAction SilentlyContinue
 ```
+
+The Codex App CLI may not be present in PowerShell's `PATH`; invoking the newest executable under
+`%LOCALAPPDATA%\OpenAI\Codex\bin` avoids `CommandNotFoundException`. Do not delete the plugin source
+before the two CLI commands complete. For a full cleanup, also remove the Stop handler whose command
+contains `codex-hook-wrapper.js` from `%USERPROFILE%\.codex\hooks.json` and its corresponding
+`[hooks.state."...hooks.json:stop:..."]` section from `%USERPROFILE%\.codex\config.toml`. Preserve
+unrelated hooks and hook state entries.
 
 If you only want to pause collection while keeping the plugin installed, set `enabled=false` or use the installer disable switch described above. To disable plugin loading entirely while keeping its files, remove it from Codex:
 

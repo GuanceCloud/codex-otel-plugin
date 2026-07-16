@@ -6,7 +6,8 @@ import test from "node:test";
 
 import { resolveConfig } from "../src/codex-config.js";
 import { runHook } from "../src/codex-hook-wrapper.js";
-import { writeGtraceConfig } from "../scripts/install-config.js";
+import { writeGtraceConfig, writeHooksConfig } from "../scripts/install-config.js";
+import { gtraceTrustEntries } from "../scripts/trust-hook.js";
 
 test("resolveConfig only reads gtrace.json files and ignores runtime config environment variables", async () => {
   const base = await mkdtemp(path.join(tmpdir(), "gtrace-config-"));
@@ -92,6 +93,32 @@ test("installer config preserves enabled and only changes it when explicitly req
 
   writeGtraceConfig({ configFile, installType: "gtrace", scriptEnabled: false });
   assert.equal(JSON.parse(await readFile(configFile, "utf-8")).enabled, false);
+});
+
+test("installer merges the global Stop hook without removing unrelated hooks", async () => {
+  const base = await mkdtemp(path.join(tmpdir(), "gtrace-hooks-config-"));
+  const hooksFile = path.join(base, "hooks.json");
+  await writeFile(hooksFile, JSON.stringify({
+    hooks: {
+      SessionStart: [{ hooks: [{ type: "command", command: "keep-me" }] }],
+      Stop: [{ hooks: [{ type: "command", command: "node old/codex-hook-wrapper.js" }] }],
+    },
+  }), "utf-8");
+
+  writeHooksConfig({ hooksFile, command: "node new/codex-hook-wrapper.js" });
+  const config = JSON.parse(await readFile(hooksFile, "utf-8"));
+  assert.equal(config.hooks.SessionStart[0].hooks[0].command, "keep-me");
+  assert.equal(config.hooks.Stop.length, 1);
+  assert.equal(config.hooks.Stop[0].hooks[0].command, "node new/codex-hook-wrapper.js");
+});
+
+test("installer trusts only the discovered GTrace user hook", () => {
+  const entries = gtraceTrustEntries({ data: [{ hooks: [
+    { source: "user", command: "node /cache/codex-hook-wrapper.js", key: "gtrace-key", currentHash: "sha256:gtrace" },
+    { source: "user", command: "echo unrelated", key: "other-key", currentHash: "sha256:other" },
+    { source: "plugin", command: "node /cache/codex-hook-wrapper.js", key: "plugin-key", currentHash: "sha256:plugin" },
+  ] }] });
+  assert.deepEqual(entries, [["gtrace-key", { trusted_hash: "sha256:gtrace" }]]);
 });
 
 test("disabled hook exits before reading stdin or transcript", async () => {

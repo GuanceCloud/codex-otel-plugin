@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { resolveConfig } from "../src/codex-config.js";
 import { runHook } from "../src/codex-hook-wrapper.js";
@@ -124,6 +126,46 @@ test("installer config overwrites managed auth and agent tags with the latest in
     tags: ["agent_id=newid", "agent_name=newname"],
   });
 
+  const config = JSON.parse(await readFile(configFile, "utf-8"));
+  assert.equal(config.headers["X-Token"], "agent_new");
+  assert.equal(config.resourceAttributes.agent_id, "newid");
+  assert.equal(config.resourceAttributes.agent_name, "newname");
+});
+
+test("installer config CLI runs when its script path contains a symlink", async (t) => {
+  const base = await mkdtemp(path.join(tmpdir(), "gtrace-installer-symlink-"));
+  const linkedScripts = path.join(base, "linked-scripts");
+  const configFile = path.join(base, "gtrace.json");
+
+  try {
+    await symlink(fileURLToPath(new URL("../scripts", import.meta.url)), linkedScripts, "dir");
+  } catch (error) {
+    if (["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) {
+      t.skip(`symbolic links are unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  const result = spawnSync(
+    process.execPath,
+    [path.join(linkedScripts, "install-config.js"), "write-gtrace-config"],
+    {
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        GTRACE_CONFIG_FILE_RUNTIME: configFile,
+        GTRACE_ENDPOINT_RUNTIME: "https://llm-openway.guance.com",
+        GTRACE_TRACE_PATH_RUNTIME: "v1/write/otel-llm",
+        GTRACE_METRICS_PATH_RUNTIME: "v1/write/otel-metrics",
+        GTRACE_INSTALL_TYPE_RUNTIME: "gtrace",
+        GTRACE_X_TOKEN_RUNTIME: "agent_new",
+        GTRACE_TAGS_RUNTIME: JSON.stringify(["agent_id=newid", "agent_name=newname"]),
+      },
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
   const config = JSON.parse(await readFile(configFile, "utf-8"));
   assert.equal(config.headers["X-Token"], "agent_new");
   assert.equal(config.resourceAttributes.agent_id, "newid");

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 function tomlString(value) {
   return JSON.stringify(String(value));
@@ -240,7 +240,16 @@ function optionsFromEnvironment(action) {
 }
 
 const action = process.argv[2];
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   if (action === "write-codex-config") writeCodexConfig(optionsFromEnvironment(action));
   else if (action === "write-hooks-config") writeHooksConfig(optionsFromEnvironment(action));
   else if (action === "write-gtrace-config") writeGtraceConfig(optionsFromEnvironment(action));

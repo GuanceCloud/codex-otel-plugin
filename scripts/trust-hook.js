@@ -21,7 +21,7 @@ export async function trustGtraceHook({ codexCommand, cwd = process.cwd(), timeo
   const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
   const timer = setTimeout(() => child.kill(), timeoutMs);
   try {
-    send({ id: 1, method: "initialize", params: { clientInfo: { name: "gtrace-installer", version: "0.1.14-rc" }, capabilities: {} } });
+    send({ id: 1, method: "initialize", params: { clientInfo: { name: "gtrace-installer", version: "0.1.15" }, capabilities: {} } });
     for await (const line of lines) {
       const message = JSON.parse(line);
       if (message.id === 1) {

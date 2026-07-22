@@ -1,6 +1,6 @@
 {
   "name": "gtrace",
-  "version": "0.1.14-rc",
+  "version": "0.1.15",
   "description": "OTLP trace ingest and Codex hook collector.",
   "type": "module",
   "private": true,

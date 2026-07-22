@@ -1,10 +1,13 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 export function isMainModule(importMetaUrl, argvEntry = process.argv[1]) {
   if (!argvEntry) return false;
-  return importMetaUrl === pathToFileURL(path.resolve(argvEntry)).href;
+  try {
+    return fs.realpathSync(argvEntry) === fs.realpathSync(fileURLToPath(importMetaUrl));
+  } catch {
+    return false;
+  }
 }
 
 export function readStdin() {

@@ -399,26 +399,36 @@ write_config() {
   "$NODE_BIN" "$REPO_ROOT/scripts/install-config.js" write-gtrace-config
 }
 
-if [[ "$WRITE_CONFIG" -eq 1 ]]; then
-  if [[ -n "$ENDPOINT" || -f "$CONFIG_FILE" || -n "$SCRIPT_ENABLED" ]]; then
-    write_config
-    log "updated $CONFIG_FILE"
-    if [[ -n "$ENDPOINT" ]]; then
-      log "configured endpoint: $ENDPOINT"
-    fi
-    log "configured trace path: $TRACE_PATH"
-    log "configured metrics path: $METRICS_PATH"
-    if [[ -n "$X_TOKEN" ]]; then
-      log "configured X-Token: <redacted>"
+log_config_result() {
+  log "updated $CONFIG_FILE"
+  if [[ -n "$ENDPOINT" ]]; then
+    log "configured endpoint: $ENDPOINT"
+  fi
+  log "configured trace path: $TRACE_PATH"
+  log "configured metrics path: $METRICS_PATH"
+  if [[ -n "$X_TOKEN" ]]; then
+    log "configured X-Token: <redacted>"
+  fi
+  if [[ -n "$SCRIPT_ENABLED" ]]; then
+    log "configured enabled: $SCRIPT_ENABLED"
+  fi
+}
+
+apply_config_if_needed() {
+  if [[ "$WRITE_CONFIG" -eq 1 ]]; then
+    if [[ -n "$ENDPOINT" || -f "$CONFIG_FILE" || -n "$SCRIPT_ENABLED" ]]; then
+      write_config
+      log_config_result
+    else
+      log "skipped config because --endpoint was not provided"
     fi
   else
-    log "skipped config because --endpoint was not provided"
+    log "skipped config because --no-config was set"
   fi
-else
-  log "skipped config because --no-config was set"
-fi
+}
 
 if ! command -v codex >/dev/null 2>&1; then
+  apply_config_if_needed
   cat <<EOF
 
 Codex CLI was not found, so the installer skipped the optional plugin refresh command.
@@ -459,6 +469,8 @@ If Codex still does not load the plugin after restart, run this to refresh the c
   codex plugin add "$PLUGIN_NAME@$MARKETPLACE_NAME"
 EOF
 fi
+
+apply_config_if_needed
 
 "$NODE_BIN" "$REPO_ROOT/scripts/trust-hook.js" "$(command -v codex)" "$REPO_ROOT"
 sync_plugin_cache

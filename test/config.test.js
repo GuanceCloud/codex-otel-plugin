@@ -95,6 +95,41 @@ test("installer config preserves enabled and only changes it when explicitly req
   assert.equal(JSON.parse(await readFile(configFile, "utf-8")).enabled, false);
 });
 
+test("installer config overwrites managed auth and agent tags with the latest install values", async () => {
+  const base = await mkdtemp(path.join(tmpdir(), "gtrace-installer-overwrite-"));
+  const configFile = path.join(base, "gtrace.json");
+  await writeFile(configFile, JSON.stringify({
+    enabled: true,
+    endpoint: "https://llm-openway.guance.com",
+    tracePath: "v1/write/otel-llm",
+    metricsPath: "v1/write/otel-metrics",
+    debug: true,
+    headers: {
+      "To-Headless": "true",
+      "X-Token": "agent_old",
+    },
+    resourceAttributes: {
+      agent_id: "oldid",
+      agent_name: "oldname",
+    },
+  }, null, 2), "utf-8");
+
+  writeGtraceConfig({
+    configFile,
+    installType: "gtrace",
+    endpoint: "https://llm-openway.guance.com",
+    tracePath: "v1/write/otel-llm",
+    metricsPath: "v1/write/otel-metrics",
+    xToken: "agent_new",
+    tags: ["agent_id=newid", "agent_name=newname"],
+  });
+
+  const config = JSON.parse(await readFile(configFile, "utf-8"));
+  assert.equal(config.headers["X-Token"], "agent_new");
+  assert.equal(config.resourceAttributes.agent_id, "newid");
+  assert.equal(config.resourceAttributes.agent_name, "newname");
+});
+
 test("installer merges the global Stop hook without removing unrelated hooks", async () => {
   const base = await mkdtemp(path.join(tmpdir(), "gtrace-hooks-config-"));
   const hooksFile = path.join(base, "hooks.json");

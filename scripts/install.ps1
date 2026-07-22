@@ -242,33 +242,37 @@ Write-InstallLog "updated Codex hooks: $HooksFile"
 
 $ScriptEnabled = if ($EnableScript) { "true" } elseif ($DisableScript) { "false" } else { "" }
 $ShouldWriteConfig = -not $NoConfig -and ($Endpoint -or (Test-Path -LiteralPath $ConfigFile) -or $ScriptEnabled)
-if ($ShouldWriteConfig) {
-  $env:GTRACE_CONFIG_FILE_RUNTIME = $ConfigFile
-  $env:GTRACE_ENDPOINT_RUNTIME = $Endpoint
-  $env:GTRACE_TRACE_PATH_RUNTIME = $TracePath
-  $env:GTRACE_METRICS_PATH_RUNTIME = $MetricsPath
-  $env:GTRACE_INSTALL_TYPE_RUNTIME = $Type
-  $env:GTRACE_X_TOKEN_RUNTIME = $XToken
-  $env:GTRACE_DEBUG_RUNTIME = if ($NoDebug) { "false" } else { "true" }
-  $env:GTRACE_SCRIPT_ENABLED_RUNTIME = $ScriptEnabled
-  $env:GTRACE_TAGS_RUNTIME = ConvertTo-Json -InputObject @($Tag) -Compress
-  $env:GTRACE_HEADERS_RUNTIME = ConvertTo-Json -InputObject @($Header) -Compress
-  & $NodeBin $ConfigHelper write-gtrace-config
-  if ($LASTEXITCODE -ne 0) { throw "Failed to update $ConfigFile" }
-  Write-InstallLog "updated $ConfigFile"
-  if ($Endpoint) { Write-InstallLog "configured endpoint: $Endpoint" }
-  Write-InstallLog "configured trace path: $TracePath"
-  Write-InstallLog "configured metrics path: $MetricsPath"
-  if ($XToken) { Write-InstallLog "configured X-Token: <redacted>" }
-  if ($ScriptEnabled) { Write-InstallLog "configured enabled: $ScriptEnabled" }
-} elseif ($NoConfig) {
-  Write-InstallLog "skipped config because -NoConfig was set"
-} else {
-  Write-InstallLog "skipped config because -Endpoint was not provided"
+
+function Write-GTraceConfigIfNeeded {
+  if ($ShouldWriteConfig) {
+    $env:GTRACE_CONFIG_FILE_RUNTIME = $ConfigFile
+    $env:GTRACE_ENDPOINT_RUNTIME = $Endpoint
+    $env:GTRACE_TRACE_PATH_RUNTIME = $TracePath
+    $env:GTRACE_METRICS_PATH_RUNTIME = $MetricsPath
+    $env:GTRACE_INSTALL_TYPE_RUNTIME = $Type
+    $env:GTRACE_X_TOKEN_RUNTIME = $XToken
+    $env:GTRACE_DEBUG_RUNTIME = if ($NoDebug) { "false" } else { "true" }
+    $env:GTRACE_SCRIPT_ENABLED_RUNTIME = $ScriptEnabled
+    $env:GTRACE_TAGS_RUNTIME = ConvertTo-Json -InputObject @($Tag) -Compress
+    $env:GTRACE_HEADERS_RUNTIME = ConvertTo-Json -InputObject @($Header) -Compress
+    & $NodeBin $ConfigHelper write-gtrace-config
+    if ($LASTEXITCODE -ne 0) { throw "Failed to update $ConfigFile" }
+    Write-InstallLog "updated $ConfigFile"
+    if ($Endpoint) { Write-InstallLog "configured endpoint: $Endpoint" }
+    Write-InstallLog "configured trace path: $TracePath"
+    Write-InstallLog "configured metrics path: $MetricsPath"
+    if ($XToken) { Write-InstallLog "configured X-Token: <redacted>" }
+    if ($ScriptEnabled) { Write-InstallLog "configured enabled: $ScriptEnabled" }
+  } elseif ($NoConfig) {
+    Write-InstallLog "skipped config because -NoConfig was set"
+  } else {
+    Write-InstallLog "skipped config because -Endpoint was not provided"
+  }
 }
 
 $ResolvedCodexCommand = Resolve-CodexCommand
 if (-not $ResolvedCodexCommand) {
+  Write-GTraceConfigIfNeeded
   Write-Host ""
   Write-Warning "No usable Codex CLI was found. Plugin files and config were installed successfully; the optional CLI refresh was skipped."
   Write-Host "Restart Codex so the Stop hook is reloaded."
@@ -290,6 +294,9 @@ if ($Refresh) {
 if ((Invoke-Codex -Arguments @("plugin", "add", $PluginSelector) -IgnoreFailure) -ne 0) {
   Write-Warning "Plugin files were written, but Codex CLI did not add the plugin automatically."
 }
+
+Write-GTraceConfigIfNeeded
+
 & $NodeBin $TrustHookHelper $script:CodexCommand $RepoRoot
 if ($LASTEXITCODE -ne 0) { throw "Failed to trust the GTrace Codex Stop hook." }
 Sync-PluginCache

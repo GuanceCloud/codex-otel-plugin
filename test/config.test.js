@@ -4,10 +4,11 @@ import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { resolveConfig } from "../src/codex-config.js";
 import { runHook } from "../src/codex-hook-wrapper.js";
+import { isMainModule } from "../src/codex-utils.js";
 import { writeGtraceConfig, writeHooksConfig } from "../scripts/install-config.js";
 import { gtraceTrustEntries } from "../scripts/trust-hook.js";
 
@@ -132,7 +133,7 @@ test("installer config overwrites managed auth and agent tags with the latest in
   assert.equal(config.resourceAttributes.agent_name, "newname");
 });
 
-test("installer config CLI runs when its script path contains a symlink", async (t) => {
+test("installer CLIs run when their script paths contain a symlink", async (t) => {
   const base = await mkdtemp(path.join(tmpdir(), "gtrace-installer-symlink-"));
   const linkedScripts = path.join(base, "linked-scripts");
   const configFile = path.join(base, "gtrace.json");
@@ -170,6 +171,32 @@ test("installer config CLI runs when its script path contains a symlink", async 
   assert.equal(config.headers["X-Token"], "agent_new");
   assert.equal(config.resourceAttributes.agent_id, "newid");
   assert.equal(config.resourceAttributes.agent_name, "newname");
+
+  const trustResult = spawnSync(
+    process.execPath,
+    [path.join(linkedScripts, "trust-hook.js")],
+    { encoding: "utf-8" },
+  );
+  assert.notEqual(trustResult.status, 0);
+  assert.match(trustResult.stderr, /Usage: node scripts\/trust-hook\.js/);
+});
+
+test("runtime CLI entrypoint detection resolves symlinked paths", async (t) => {
+  const base = await mkdtemp(path.join(tmpdir(), "gtrace-runtime-symlink-"));
+  const sourceFile = fileURLToPath(new URL("../src/codex-hook-wrapper.js", import.meta.url));
+  const linkedFile = path.join(base, "codex-hook-wrapper.js");
+
+  try {
+    await symlink(sourceFile, linkedFile, "file");
+  } catch (error) {
+    if (["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) {
+      t.skip(`symbolic links are unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  assert.equal(isMainModule(pathToFileURL(sourceFile).href, linkedFile), true);
 });
 
 test("installer merges the global Stop hook without removing unrelated hooks", async () => {

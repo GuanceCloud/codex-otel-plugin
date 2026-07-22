@@ -1,6 +1,7 @@
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 export function gtraceTrustEntries(response) {
   const entries = Array.isArray(response?.data) ? response.data : [];
@@ -47,7 +48,16 @@ export async function trustGtraceHook({ codexCommand, cwd = process.cwd(), timeo
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   const codexCommand = process.argv[2];
   if (!codexCommand) throw new Error("Usage: node scripts/trust-hook.js <codex-command> [cwd]");
   await trustGtraceHook({ codexCommand, cwd: process.argv[3] || process.cwd() });
